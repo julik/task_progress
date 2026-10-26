@@ -1,0 +1,222 @@
+# frozen_string_literal: true
+
+class TaskProgress
+  # The tree as it stands after a run of events: what `apply` folds them into. It checks every
+  # event before it changes anything, so a bad one raises and leaves the state as it was. Not
+  # thread-safe on its own - the Log holds its lock around every apply
+  class State
+    ATTRIBUTES = %i[name total weight expect indeterminate unit].freeze
+    FIELDS = %i[name total count percent weight expect indeterminate unit message status error stale
+      opened_at started_at finished_at].freeze
+
+    Node = Struct.new(*FIELDS, :children, :sealed) do
+      def finished? = status == :done || status == :failed
+
+      def to_h
+        FIELDS.to_h { [it, self[it]] }.compact.tap do |h|
+          h.delete(:stale) unless stale
+          h.delete(:indeterminate) unless indeterminate
+          h.delete(:weight) if weight == 1.0
+        end
+      end
+
+      def deep_dup = dup.tap { it.children = children.dup }
+    end
+
+    def self.blank_node(at) = Node.new(name: "", count: 0, percent: 0, weight: 1.0, status: :pending, opened_at: at, children: [])
+
+    # Folding the squash of a state gives that state back, which is what makes a squashed log
+    # interchangeable with the one it came from
+    def self.fold(events, at: 0.0) = new.tap { |state| events.each { state.apply(it, at:) } }
+
+    def initialize(nodes = {})
+      @nodes = nodes
+    end
+
+    def [](path) = @nodes[path]
+
+    def key?(path) = @nodes.key?(path)
+
+    def empty? = @nodes.empty?
+
+    def size = @nodes.size
+
+    def children(path) = @nodes.fetch(path).children.map { [*path, it].freeze }
+
+    def next_child(path) = (@nodes.fetch(path).children.last || -1) + 1
+
+    # Pre-order, children by position - the order a renderer wants and the order puts replay in
+    def each(path = [], &block)
+      return enum_for(:each, path) unless block
+      node = @nodes[path] or return
+      yield path, node
+      node.children.each { each([*path, it].freeze, &block) }
+    end
+
+    def apply(event, at:, journal: nil)
+      path, op, value = event.path, event.op, event.value
+      node = @nodes[path]
+      case op
+      when :open
+        raise ArgumentError, "A task already exists at #{path.inspect}" if node
+        parent = parent_of!(path)
+        journal&.touch(path, nil)
+        journal&.touch(path[0...-1], parent) if parent
+        @nodes[path] = State.blank_node(at).tap { assign(it, value) }
+        adopt(parent, path) if parent
+      when :meta
+        existing!(path, node)
+        journal&.touch(path, node)
+        assign(node, value)
+        node.stale = value[:stale] if value.key?(:stale)
+      when :set
+        updatable!(path, node)
+        raise ArgumentError, "Percent must be between 0 and 100 inclusive, got #{value.inspect}" unless value.is_a?(Numeric) && (0..100).cover?(value)
+        start(path, at, journal)
+        node.percent = value
+      when :add
+        updatable!(path, node)
+        raise ArgumentError, "Count delta must be an Integer, got #{value.inspect}" unless value.is_a?(Integer)
+        start(path, at, journal)
+        node.count = [node.count + value, 0].max
+      when :note
+        updatable!(path, node)
+        start(path, at, journal)
+        node.message = value
+      when :done, :fail
+        updatable!(path, node)
+        start(path, at, journal)
+        node.finished_at = at
+        node.status = (op == :done) ? :done : :failed
+        node.error = value if op == :fail
+      when :prune
+        return self unless node # so a squashed run may carry a prune for a node made within it
+        journal&.touch(path, node)
+        each(path).drop(1).each do |sub, subnode|
+          journal&.touch(sub, subnode)
+          @nodes.delete(sub)
+        end
+        node.children = []
+      when :put
+        parent = parent_of!(path)
+        journal&.touch(path, node)
+        journal&.touch(path[0...-1], parent) if parent && node.nil?
+        fresh = State.blank_node(at)
+        FIELDS.each { fresh[it] = value[it] if value.key?(it) }
+        fresh.status = fresh.status.to_sym
+        fresh.children = node ? node.children : []
+        fresh.sealed = node&.sealed
+        @nodes[path] = fresh
+        adopt(parent, path) if parent && node.nil?
+      else
+        raise ArgumentError, "Unknown op #{op.inspect}"
+      end
+      self
+    end
+
+    # The state as a list of puts, one per node, in pre-order
+    def squash = each.map { |path, node| Event.new(path:, op: :put, value: node.to_h) }
+
+    def complete?(path = [], node = @nodes[path])
+      return false unless node
+      return true if node.status == :done
+      return false if node.children.empty? || missing(node).positive?
+      node.children.all? { complete?([*path, it], @nodes[[*path, it]]) }
+    end
+
+    # 0.0..1.0, unrounded. Children decide a parent's progress, by weight, and children it was
+    # told to expect but has not got yet count as zero. A leaf goes by its count when it has a
+    # total, and by its percent otherwise
+    def fraction(path = [], node = @nodes[path])
+      return 0.0 unless node
+      return 1.0 if node.status == :done
+      if node.children.any? || missing(node).positive?
+        weights = missing(node).to_f
+        sum = 0.0
+        node.children.each do |ordinal|
+          child_path = [*path, ordinal]
+          child = @nodes[child_path]
+          weights += child.weight
+          sum += child.weight * fraction(child_path, child)
+        end
+        weights.zero? ? 0.0 : sum / weights
+      elsif node.total
+        node.total.zero? ? 0.0 : (node.count.to_f / node.total).clamp(0.0, 1.0)
+      elsif node.indeterminate
+        0.0
+      else
+        node.percent / 100.0
+      end
+    end
+
+    # A whole percent, and 100 only once everything under it is done: 99.5 does not round up
+    # into a bar that reads as finished while work is still running
+    def percent(path = [])
+      return 100 if complete?(path)
+      [(fraction(path) * 100).round, 99].min
+    end
+
+    def to_h = @nodes.transform_values(&:to_h)
+
+    def snapshot
+      State.new(@nodes.to_h { |path, node| [path, node.deep_dup.tap { it.children.freeze }.freeze] }.freeze).freeze
+    end
+
+    def dup = State.new(@nodes.transform_values(&:deep_dup))
+
+    # The changes one transaction made, so that it can be undone whole
+    class Journal
+      def initialize = @saved = {}
+
+      def touch(path, node)
+        @saved[path] = node&.deep_dup unless @saved.key?(path)
+      end
+
+      def rollback(nodes)
+        @saved.each { |path, node| node ? nodes[path] = node : nodes.delete(path) }
+      end
+    end
+
+    def rollback(journal) = journal.rollback(@nodes)
+
+    private
+
+    def missing(node) = [(node.expect || 0) - node.children.length, 0].max
+
+    def parent_of!(path)
+      return nil if path.empty?
+      @nodes[path[0...-1]] or raise ArgumentError, "No parent task at #{path[0...-1].inspect} for #{path.inspect}"
+    end
+
+    def existing!(path, node)
+      node or raise ArgumentError, "No task at #{path.inspect}"
+    end
+
+    def updatable!(path, node)
+      existing!(path, node)
+      raise ArgumentError, "Cannot update task '#{node.name}' - already in #{node.status} state" if node.finished?
+    end
+
+    # Work started anywhere starts everything above it too
+    def start(path, at, journal)
+      path.length.downto(0) do |length|
+        prefix = path[0, length]
+        node = @nodes[prefix]
+        journal&.touch(prefix, node)
+        node.status = :active if node.status == :pending
+        node.started_at ||= at
+      end
+    end
+
+    def assign(node, value)
+      ATTRIBUTES.each { node[it] = value[it] if value.key?(it) }
+      node.weight = node.weight.to_f
+    end
+
+    def adopt(parent, path)
+      ordinal = path.last
+      index = parent.children.bsearch_index { it >= ordinal } || parent.children.length
+      parent.children.insert(index, ordinal) unless parent.children[index] == ordinal
+    end
+  end
+end

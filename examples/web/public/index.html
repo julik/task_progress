@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TaskProgress bench</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/bench.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@hotwired/stimulus": "https://unpkg.com/@hotwired/stimulus@3.2.2/dist/stimulus.js",
+        "react": "https://esm.sh/react@18.3.1",
+        "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+        "htm": "https://esm.sh/htm@3.1.1"
+      }
+    }
+  </script>
+  <script type="module" src="/bench.js"></script>
+</head>
+<body>
+  <div class="bench">
+    <aside>
+      <h1>TaskProgress bench</h1>
+      <section class="settings">
+        <label>Speed
+          <select id="speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="drop"> Cut the stream every <input type="number" id="drop-after" value="40" min="1"> frames</label>
+      </section>
+      <h2>Scenarios</h2>
+      <div id="scenarios"></div>
+      <h2>Recent jobs</h2>
+      <div id="jobs" class="jobs"><div class="empty">None yet.</div></div>
+    </aside>
+    <main>
+      <header class="job">
+        <div>
+          <div class="job-title" id="job-title">Pick a scenario</div>
+          <div class="job-meta" id="job-meta">Each one starts a job on the server; both renderers and the inspector follow its stream.</div>
+        </div>
+        <button id="cancel" class="secondary" hidden>Cancel job</button>
+      </header>
+      <div class="panes">
+        <section>
+          <h3>Stimulus</h3>
+          <div class="tree" id="stimulus-tree" data-controller="task-tree"></div>
+        </section>
+        <section>
+          <h3>React</h3>
+          <div class="tree" id="react-tree"></div>
+        </section>
+      </div>
+      <section class="inspector">
+        <h3>Stream inspector</h3>
+        <dl id="stats"></dl>
+        <ol id="log" class="log"></ol>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

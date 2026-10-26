@@ -1,0 +1,370 @@
+require_relative "test_helper"
+
+# The handle API. Much of it carries the cases of the ProgressTree suite this gem came from
+class TaskTest < Minitest::Test
+  include TestHelpers
+
+  def setup
+    @calls = []
+  end
+
+  def summary = ->(percent:, message:) { @calls << {percent:, message:} }
+
+  def test_a_root_starts_pending_and_empty
+    root = TaskProgress.new("Root")
+    assert_equal "Root", root.name
+    assert_nil root.parent
+    assert_empty root.subtasks
+    assert_equal :pending, root.status
+    assert_equal 0, root.percent
+    refute root.done?
+  end
+
+  def test_subtasks_know_their_parent_and_path
+    root = TaskProgress.new("Root")
+    a, b = root.subtask("A"), root.subtask("B")
+    a1 = a.subtask("A1")
+    assert_equal [[0], [1], [0, 0]], [a.path, b.path, a1.path]
+    assert_equal root, a.parent
+    assert_equal a, a1.parent
+    assert_equal root, a1.root
+    assert_equal [a, b], root.subtasks
+  end
+
+  def test_update_to_moves_the_percent_and_reports
+    root = TaskProgress.new("Task", &summary)
+    root.update_to(percent: 50, message: "Halfway done")
+    assert_equal 50, root.percent
+    assert_equal :active, root.status
+    assert_equal [{percent: 50, message: "Halfway done"}], @calls
+  end
+
+  def test_update_to_100_finishes_the_task
+    root = TaskProgress.new("Task", &summary)
+    root.update_to(percent: 100, message: "Custom message")
+    assert root.done?
+    assert_equal :done, root.status
+    assert_equal({percent: 100, message: "Task complete"}, @calls.last)
+  end
+
+  def test_percent_must_be_in_range
+    task = TaskProgress.new("Task")
+    assert_raises(ArgumentError) { task.update_to(percent: 150) }
+    assert_raises(ArgumentError) { task.update_to(percent: -10) }
+    assert_equal :pending, task.status, "a refused update changes nothing"
+  end
+
+  def test_a_fractional_percent_is_kept
+    task = TaskProgress.new("Task")
+    task.update_to(percent: 50.5)
+    assert_in_delta 0.505, task.fraction
+    assert_equal 51, task.percent
+  end
+
+  def test_a_finished_task_refuses_updates_but_finishing_again_is_a_no_op
+    task = TaskProgress.new("Task", &summary)
+    task.done!
+    assert_raises(ArgumentError) { task.update_to(percent: 50) }
+    assert_raises(ArgumentError) { task.advance! }
+    assert_raises(ArgumentError) { task.note("late") }
+    task.done!
+    task.fail!("too late")
+    assert_equal :done, task.status
+    assert_equal 1, @calls.length
+  end
+
+  def test_a_failed_task_stays_failed
+    task = TaskProgress.new("Task")
+    task.fail!
+    task.done!
+    assert_equal :failed, task.status
+    assert_equal "Task failed", task.error[:message]
+    assert_raises(ArgumentError) { task.update_to(percent: 50) }
+  end
+
+  def test_fail_carries_the_error_its_causes_and_extras
+    task = TaskProgress.new("Task")
+    begin
+      begin
+        raise IOError, "inner"
+      rescue IOError
+        raise ArgumentError, "outer"
+      end
+    rescue => e
+      task.fail!(e, input: true)
+    end
+    assert_equal "ArgumentError", task.error[:class]
+    assert_equal "outer", task.error[:message]
+    assert_equal "IOError", task.error.dig(:cause, :class)
+    assert_equal true, task.error[:input]
+    assert_equal e.backtrace, task.error[:backtrace]
+  end
+
+  def test_progress_is_the_weighted_mean_of_the_children
+    root = TaskProgress.new("Root")
+    a, b = root.subtask("A"), root.subtask("B")
+    assert_equal 0, root.percent
+    a.update_to(percent: 50)
+    assert_equal 25, root.percent
+    b.update_to(percent: 100)
+    assert_equal 75, root.percent
+    a.done!
+    assert_equal 100, root.percent
+    assert root.done?, "a parent whose children are all done is done"
+  end
+
+  def test_weights
+    root = TaskProgress.new("Root")
+    light, heavy = root.subtask("light"), root.subtask("heavy", weight: 3)
+    heavy.done!
+    assert_equal 75, root.percent
+    light.update_to(percent: 50)
+    assert_equal 88, root.percent
+  end
+
+  def test_expected_subtasks_hold_the_denominator
+    root = TaskProgress.new("Root", expect: 2)
+    root.subtask("1").update_to(percent: 50)
+    assert_equal 25, root.percent
+    root.subtask("2").update_to(percent: 100)
+    assert_equal 75, root.percent
+    root.subtask("3").update_to(percent: 75)
+    assert_equal 75, root.percent, "past the expected count the denominator grows"
+    root.subtask("4").update_to(percent: 25)
+    assert_equal 63, root.percent
+  end
+
+  def test_an_expected_subtask_not_yet_made_keeps_the_parent_from_done
+    root = TaskProgress.new("Root", expect: 2)
+    root.subtask("only").done!
+    assert_equal 50, root.percent
+    refute root.done?
+  end
+
+  def test_the_complex_tree_from_the_original_suite
+    root = TaskProgress.new("Fact Extraction", &summary)
+    email, llm, memory = root.subtask("Email Analysis"), root.subtask("LLM Processing"), root.subtask("Memory Saving")
+    loading, parsing = email.subtask("Email Loading"), email.subtask("Email Parsing")
+
+    loading.update_to(percent: 25, message: "Loading emails...")
+    assert_equal 4, root.percent
+    loading.update_to(percent: 100, message: "Emails loaded")
+    parsing.update_to(percent: 50, message: "Parsing emails...")
+    assert_equal 25, root.percent
+    parsing.done!
+    assert_equal 33, root.percent
+    llm.update_to(percent: 75)
+    assert_equal 58, root.percent
+    memory.update_to(percent: 50)
+    assert_equal 75, root.percent
+    llm.done!
+    memory.done!
+    assert_equal 100, root.percent
+    assert_equal({percent: 100, message: "Memory Saving complete"}, @calls.last)
+  end
+
+  def test_a_tree_never_rounds_up_to_100_with_work_still_running
+    root = TaskProgress.new("R")
+    root.subtask("A").done!
+    b = root.subtask("B")
+    b.update_to(percent: 99)
+    assert_equal 99, root.percent, "(100 + 99) / 2 is 99.5, which must not read as done"
+    refute root.done?
+  end
+
+  def test_counted_tasks
+    root = TaskProgress.new("R")
+    rows = root.subtask("Rows", total: 4)
+    rows.tick!
+    rows.advance!(2, message: "three in")
+    assert_equal 75, rows.percent
+    assert_equal 3, rows.count
+    assert_equal "three in", rows.message
+    rows.advance!(5)
+    assert_equal 99, rows.percent, "a count past its total is still not done"
+    rows.total = 20
+    assert_equal 40, rows.percent
+    rows.done!
+    assert_equal 100, root.percent
+  end
+
+  def test_indeterminate_tasks_count_for_nothing_until_done
+    root = TaskProgress.new("R")
+    waiting, other = root.subtask("Waiting", indeterminate: true), root.subtask("Other")
+    other.done!
+    waiting.note("still waiting")
+    assert_equal 50, root.percent
+    waiting.done!
+    assert root.done?
+  end
+
+  def test_the_block_form_finishes_or_fails_the_task
+    root = TaskProgress.new("Root")
+    assert_equal :ok, root.subtask("Fine") { |t| t.update_to(percent: 50) && :ok }
+    assert_equal :done, root.subtasks.first.status
+
+    assert_raises(RuntimeError) { root.subtask("Broken") { raise "Something went wrong" } }
+    broken = root.subtasks.last
+    assert_equal :failed, broken.status
+    assert_equal "Something went wrong", broken.error[:message]
+  end
+
+  def test_the_block_form_fails_on_interrupt_too
+    root = TaskProgress.new("Root")
+    assert_raises(Interrupt) { root.subtask("Interrupted") { raise Interrupt } }
+    assert_equal :failed, root.subtasks.first.status
+    assert_equal "Interrupt", root.subtasks.first.error[:class]
+  end
+
+  def test_nested_failures_fail_each_level
+    root = TaskProgress.new("Root")
+    assert_raises(RuntimeError) do
+      root.subtask("Parent") do |parent|
+        parent.subtask("Child") { raise "Child error" }
+      end
+    end
+    parent = root.subtasks.first
+    assert_equal :failed, parent.status
+    assert_equal :failed, parent.subtasks.first.status
+  end
+
+  def test_messages_reach_the_tree_as_valid_utf8
+    received = []
+    task = TaskProgress.new("root") { |percent:, message:| received << message }
+    task.update_to(percent: 10, message: "Reading Alice’s.xhtml".b)
+    task.update_to(percent: 20, message: "Broken \xE2 byte".b)
+    assert_equal ["Reading Alice’s.xhtml", "Broken � byte"], received
+  end
+
+  def test_a_transaction_commits_as_one_batch
+    batches, output = recording
+    root = TaskProgress.new("Root", outputs: [output])
+    a, b = root.subtask("A"), root.subtask("B")
+    before = batches.length
+    root.transaction do
+      a.done!
+      b.update_to(percent: 50, message: "together")
+      root.subtask("C")
+    end
+    assert_equal before + 1, batches.length
+    assert_equal %i[done note set open], batches.last.events.map(&:op)
+  end
+
+  def test_a_transaction_that_raises_leaves_nothing_behind
+    batches, output = recording
+    root = TaskProgress.new("Root", outputs: [output])
+    a = root.subtask("A")
+    seq = root.log.seq
+    assert_raises(RuntimeError) do
+      root.transaction do
+        a.update_to(percent: 70)
+        root.subtask("Ghost")
+        raise "no"
+      end
+    end
+    assert_equal seq, root.log.seq
+    assert_equal 0, a.percent
+    assert_equal [a], root.subtasks
+    assert_equal seq, batches.last.seq
+  end
+
+  def test_a_refused_change_inside_a_transaction_rolls_back_the_rest
+    root = TaskProgress.new("Root")
+    a, b = root.subtask("A"), root.subtask("B")
+    b.done!
+    assert_raises(ArgumentError) do
+      root.transaction do
+        a.update_to(percent: 70)
+        b.update_to(percent: 10)
+      end
+    end
+    assert_equal 0, a.percent
+  end
+
+  def test_track_io_counts_the_furthest_byte_read
+    root = TaskProgress.new("R")
+    reading = root.subtask("Reading")
+    io = reading.track_io(StringIO.new("x" * 100))
+    io.read(25)
+    assert_equal 25, reading.percent
+    io.seek(0)
+    io.read(10)
+    assert_equal 25, reading.count, "a seek back does not count twice"
+    io.read
+    assert_equal 99, reading.percent
+    assert_equal "bytes", reading.node.unit
+    reading.done!
+    io.seek(0)
+    io.read(10)
+    assert_equal :done, reading.status
+  end
+
+  def test_track_io_hands_back_an_io_it_cannot_size
+    task = TaskProgress.new("R")
+    unsized = Object.new
+    assert_same unsized, task.track_io(unsized)
+  end
+
+  def test_concurrent_updates_lose_and_duplicate_nothing
+    batches, output = recording
+    root = TaskProgress.new("Root", outputs: [output])
+    workers = 10
+    per_worker = 50
+    groups = workers.times.map { root.subtask("worker-#{it}", total: per_worker) }
+    groups.each_with_index.map do |group, w|
+      Thread.new do
+        per_worker.times { group.tick!(message: "w#{w} step #{it}") }
+        group.done!
+      end
+    end.each(&:join)
+
+    assert root.done?
+    assert_equal (1..root.log.seq).to_a, batches.map(&:seq)
+    assert(batches.each_cons(2).all? { |a, b| b.prev == a.seq })
+    notes = batches.flat_map(&:events).select { it.op == :note }.map(&:value)
+    assert_equal workers * per_worker, notes.uniq.length
+    assert_equal workers * per_worker, notes.length
+  end
+
+  def test_concurrent_block_failure_still_fails_its_task
+    root = TaskProgress.new("Root")
+    busy = Thread.new { root.subtask("busy", total: 100) { |t| 100.times { t.tick! } } }
+    assert_raises(RuntimeError) { root.subtask("boom") { raise "kaboom" } }
+    busy.join
+    assert_equal :failed, root.subtasks.find { it.name == "boom" }.status
+    assert_equal :done, root.subtasks.find { it.name == "busy" }.status
+  end
+
+  def test_interleaved_fibers
+    messages = []
+    root = TaskProgress.new("R") { |percent:, message:| messages << message if message }
+    fibers = 3.times.map do |n|
+      task = root.subtask("f#{n}")
+      Fiber.new do
+        3.times do |i|
+          task.update_to(percent: i * 30, message: "f#{n}.#{i}")
+          Fiber.yield
+        end
+        task.done!
+      end
+    end
+    fibers.each(&:resume) while fibers.any?(&:alive?)
+    assert root.done?
+    assert_equal %w[f0.0 f1.0 f2.0], messages.first(3)
+    assert_equal 12, messages.length
+  end
+
+  def test_null_is_silent
+    out, err = capture_io { TaskProgress.null.subtask("a") { it.update_to(percent: 50, message: "half") } }
+    assert_empty out
+    assert_empty err
+  end
+
+  def test_human_bytes
+    assert_equal "0 bytes", TaskProgress.human_bytes(0)
+    assert_equal "1023 bytes", TaskProgress.human_bytes(1023)
+    assert_equal "142 KB", TaskProgress.human_bytes(142 * 1024)
+    assert_equal "2.9 MB", TaskProgress.human_bytes((2.9 * 1024**2).to_i)
+    assert_equal "1.5 TB", TaskProgress.human_bytes(1.5 * 1024**4)
+  end
+end

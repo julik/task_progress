@@ -1,0 +1,178 @@
+// The browser half of TaskProgress: folds batches into a tree the way TaskProgress::State
+// does, and works out percents by the same rules. Framework-free - the Stimulus and React
+// demos both sit on top of it.
+
+const key = (path) => path.join("/")
+const parentKey = (path) => key(path.slice(0, -1))
+
+const blankNode = (path, at) => ({
+  path, name: "", total: null, count: 0, percent: 0, weight: 1, expect: null, indeterminate: false,
+  unit: null, message: null, status: "pending", error: null, stale: false,
+  opened_at: at, started_at: null, finished_at: null, children: []
+})
+
+const ATTRIBUTES = ["name", "total", "weight", "expect", "indeterminate", "unit"]
+const FIELDS = [...ATTRIBUTES, "count", "percent", "message", "status", "error", "stale", "opened_at", "started_at", "finished_at"]
+
+export class TaskTree {
+  constructor() {
+    this.nodes = new Map()
+    this.log = null
+    this.seq = null
+    this.stale = false
+  }
+
+  // Returns "applied", "duplicate" for a batch it already has, or "gap" when the batch does not follow the last one - the tree is then
+  // stale, and stays so until a batch with prev 0 (a fresh squash) replaces it
+  apply(batch) {
+    if (batch.prev === 0) {
+      this.nodes = new Map()
+    } else if (batch.log === this.log && batch.seq <= this.seq) {
+      return "duplicate"
+    } else if (batch.log !== this.log || batch.prev !== this.seq) {
+      this.stale = true
+      return "gap"
+    }
+    for (const [path, op, value] of batch.ops) this.#applyOp(path, op, value, batch.at)
+    this.log = batch.log
+    this.seq = batch.seq
+    this.stale = false
+    return "applied"
+  }
+
+  get(path) { return this.nodes.get(key(path)) }
+
+  get root() { return this.nodes.get("") }
+
+  childrenOf(node) { return node.children.map((ordinal) => this.nodes.get(key([...node.path, ordinal]))) }
+
+  // Pre-order, children by position
+  *each(node = this.root) {
+    if (!node) return
+    yield node
+    for (const child of this.childrenOf(node)) yield* this.each(child)
+  }
+
+  complete(node) {
+    if (!node) return false
+    if (node.status === "done") return true
+    if (node.children.length === 0 || this.#missing(node) > 0) return false
+    return this.childrenOf(node).every((child) => this.complete(child))
+  }
+
+  fraction(node) {
+    if (!node) return 0
+    if (node.status === "done") return 1
+    const missing = this.#missing(node)
+    if (node.children.length > 0 || missing > 0) {
+      let weights = missing
+      let sum = 0
+      for (const child of this.childrenOf(node)) {
+        weights += child.weight
+        sum += child.weight * this.fraction(child)
+      }
+      return weights === 0 ? 0 : sum / weights
+    }
+    if (node.total != null) return node.total === 0 ? 0 : Math.min(Math.max(node.count / node.total, 0), 1)
+    if (node.indeterminate) return 0
+    return node.percent / 100
+  }
+
+  // A whole percent that reaches 100 only once everything under the node is done. Math.round
+  // rounds .5 up like Ruby's round does for the positive numbers we have here
+  percentOf(node) {
+    if (this.complete(node)) return 100
+    return Math.min(Math.round(this.fraction(node) * 100), 99)
+  }
+
+  #missing(node) { return Math.max((node.expect ?? 0) - node.children.length, 0) }
+
+  #start(path, at) {
+    for (let length = path.length; length >= 0; length--) {
+      const node = this.nodes.get(key(path.slice(0, length)))
+      if (node.status === "pending") node.status = "active"
+      node.started_at ??= at
+    }
+  }
+
+  #adopt(path) {
+    if (path.length === 0) return
+    const parent = this.nodes.get(parentKey(path))
+    const ordinal = path[path.length - 1]
+    if (!parent.children.includes(ordinal)) {
+      parent.children.push(ordinal)
+      parent.children.sort((a, b) => a - b)
+    }
+  }
+
+  #applyOp(path, op, value, at) {
+    const node = this.nodes.get(key(path))
+    switch (op) {
+      case "open": {
+        const fresh = blankNode(path, at)
+        for (const field of ATTRIBUTES) if (value[field] !== undefined) fresh[field] = value[field]
+        this.nodes.set(key(path), fresh)
+        this.#adopt(path)
+        break
+      }
+      case "meta":
+        for (const field of [...ATTRIBUTES, "stale"]) if (value[field] !== undefined) node[field] = value[field]
+        break
+      case "set": this.#start(path, at); node.percent = value; break
+      case "add": this.#start(path, at); node.count = Math.max(node.count + value, 0); break
+      case "note": this.#start(path, at); node.message = value ?? null; break
+      case "done":
+      case "fail":
+        this.#start(path, at)
+        node.finished_at = at
+        node.status = op === "done" ? "done" : "failed"
+        if (op === "fail") node.error = value
+        break
+      case "prune": {
+        if (!node) break
+        const prefix = key(path)
+        for (const k of [...this.nodes.keys()]) {
+          if (k !== prefix && (prefix === "" || k.startsWith(prefix + "/"))) this.nodes.delete(k)
+        }
+        node.children = []
+        break
+      }
+      case "put": {
+        const fresh = blankNode(path, at)
+        for (const field of FIELDS) if (value[field] !== undefined) fresh[field] = value[field]
+        fresh.children = node ? node.children : []
+        this.nodes.set(key(path), fresh)
+        if (!node) this.#adopt(path)
+        break
+      }
+    }
+  }
+}
+
+// Follows a TaskProgress::SSE stream, calling onChange(tree) after every batch. On a gap it
+// reconnects, and the server starts it over from a fresh squash
+export function follow(url, onChange) {
+  const tree = new TaskTree()
+  let source
+  const connect = () => {
+    source = new EventSource(url)
+    source.addEventListener("batch", (event) => {
+      if (tree.apply(JSON.parse(event.data)) === "gap") {
+        source.close()
+        connect()
+      }
+      onChange(tree)
+      if (tree.root && (tree.root.status === "done" || tree.root.status === "failed")) source.close()
+    })
+  }
+  connect()
+  return { tree, close: () => source.close() }
+}
+
+export function humanBytes(n) {
+  const scale = [["TB", 1024 ** 4], ["GB", 1024 ** 3], ["MB", 1024 ** 2], ["KB", 1024]]
+  const found = scale.find(([, size]) => n >= size)
+  if (!found) return `${n} bytes`
+  const value = Math.round((n / found[1]) * 10) / 10
+  return `${Number.isInteger(value) ? value : value.toFixed(1)} ${found[0]}`
+}

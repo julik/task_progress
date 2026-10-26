@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Starts the bench: scenario jobs, both browser renderers and a stream inspector.
+#   bin/dev            on http://localhost:9292
+#   PORT=4000 bin/dev
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+port="${PORT:-9292}"
+bundle check >/dev/null || bundle install
+
+echo "TaskProgress bench on http://localhost:${port}"
+# Every open stream holds a thread, and the bench opens three per job
+exec bundle exec rackup examples/web/config.ru --server puma --host 127.0.0.1 --port "$port" -O Threads=4:64

@@ -1,0 +1,49 @@
+body { padding: 0; }
+.bench { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
+aside { border-right: 1px solid var(--line); padding: 20px 16px; overflow-y: auto; }
+aside h1 { font-size: 16px; margin: 0 0 16px; }
+aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 24px 0 8px; }
+.settings { display: grid; gap: 10px; font-size: 13px; }
+.settings select, .settings input[type=number] { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
+.settings input[type=number] { width: 4em; }
+.check { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.scenario { width: 100%; text-align: left; background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
+.scenario:hover, .scenario.current { border-color: var(--fill); }
+.scenario strong { display: block; font-size: 13px; }
+.scenario span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.jobs .job-row { display: flex; justify-content: space-between; gap: 6px; align-items: center; box-sizing: border-box; height: 31px; font-size: 12px; line-height: 16px; padding: 0; border-bottom: 1px solid var(--line); }
+.jobs .job-row > span { flex: 1 1 auto; display: flex; gap: 0.3em; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.jobs .job-row .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.jobs .job-row .title + span { flex: none; }
+.jobs .job-row button { flex: none; font-size: 11px; line-height: 16px; padding: 2px 8px; }
+.jobs .status-done { color: var(--fill); }
+.jobs .status-failed { color: var(--fail); }
+/* An explicit width, or the auto margins from style.css size main to its widest single-line text */
+main { padding: 20px 24px; min-width: 0; box-sizing: border-box; width: 100%; max-width: 808px; }
+.job { display: flex; justify-content: space-between; align-items: start; gap: 12px; height: 44px; margin-bottom: 16px; }
+.job > div { flex: 1 1 auto; min-width: 0; }
+.job > button { flex: none; }
+.job-title { font-size: 18px; font-weight: 600; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-meta { color: var(--muted); font-size: 13px; line-height: 18px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.panes h3, .inspector h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 6px; }
+.panes { min-width: 0; }
+.panes > section { min-width: 0; }
+.panes .row { grid-template-columns: minmax(0, 1fr) 90px 90px; }
+.inspector { margin-top: 28px; }
+#stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin: 0 0 12px; }
+#stats div { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#stats dt { font-size: 11px; line-height: 14px; height: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#stats dd { margin: 0; font-size: 16px; line-height: 22px; height: 22px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#stats .bad dd { color: var(--fail); }
+.log { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; list-style: none; padding: 8px 10px; margin: 0; max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+.log li { height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log .reset { color: var(--fill); font-weight: 600; }
+.log .gap, .log .reconnect { color: var(--fail); }
+.log .duplicate { color: var(--stale); }
+@media (max-width: 900px) {
+  .bench { grid-template-columns: 1fr; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  .panes { grid-template-columns: 1fr; }
+  main { padding: 16px; }
+}
