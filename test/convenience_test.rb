@@ -106,13 +106,13 @@ class ConvenienceTest < Minitest::Test
     batches.each { mount << it }
     assert_equal [[*mount.path, *child.subtasks.first.path]], said.map(&:path)
 
-    squashed = TaskProgress::Outputs::Buffered::Squasher.new.squash(batches)
+    squashed = TaskProgress::Squasher.new.squash(batches)
     assert_equal ["Hello from the child"], squashed.events.select { it.op == :say }.map(&:value)
   end
 
   def test_the_terminal_prints_what_was_said_above_the_tree
     io = StringIO.new
-    term = TaskProgress::Outputs::Terminal.new(io, interval: nil)
+    term = TaskProgress::TerminalOutput.new(io, interval: nil)
     root = TaskProgress.new("Import", outputs: [term])
     root.subtask("Rows").puts("Skipped row 12")
     root.done!
@@ -124,7 +124,7 @@ class ConvenienceTest < Minitest::Test
   def test_the_terminal_shows_rate_and_time_left
     now = 1_700_000_000.0
     io = StringIO.new
-    term = TaskProgress::Outputs::Terminal.new(io, interval: nil, clock: -> { now })
+    term = TaskProgress::TerminalOutput.new(io, interval: nil, clock: -> { now })
     root = TaskProgress.new("Import", outputs: [term], log: TaskProgress::Log.new(clock: -> { now }))
     rows = root.subtask("Rows", total: 100)
     rows.tick!

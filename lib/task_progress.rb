@@ -7,7 +7,14 @@ require_relative "task_progress/wire"
 require_relative "task_progress/log"
 require_relative "task_progress/branch"
 require_relative "task_progress/mount"
-require_relative "task_progress/outputs"
+require_relative "task_progress/squasher"
+require_relative "task_progress/summary_output"
+require_relative "task_progress/ndjson_output"
+require_relative "task_progress/publishing_output"
+require_relative "task_progress/buffered_output"
+require_relative "task_progress/ractor_output"
+require_relative "task_progress/terminal_output"
+require_relative "task_progress/execution_log_output"
 require_relative "task_progress/sse"
 require_relative "task_progress/refinements"
 require_relative "task_progress/cancel_token"
@@ -56,13 +63,13 @@ class TaskProgress
   def self.cli_output(io:, quiet:)
     if (fd = ENV.delete("TASK_PROGRESS_FD"))
       # Not handed down to a process this one starts, which would hold the pipe open past our exit
-      Outputs::NDJSON.new(IO.new(Integer(fd), "w", autoclose: false).tap { it.close_on_exec = true })
+      NDJSONOutput.new(IO.new(Integer(fd), "w", autoclose: false).tap { it.close_on_exec = true })
     elsif quiet
       nil
     elsif io.tty? && !ENV["CI"] # some CI runners give a job a terminal, but nobody watches it redraw
-      Outputs::Terminal.new(io)
+      TerminalOutput.new(io)
     else
-      Outputs::ExecutionLog.new(io)
+      ExecutionLogOutput.new(io)
     end
   end
 
@@ -110,12 +117,12 @@ class TaskProgress
   # A silent root, for a library's default
   def self.null(name = "progress") = new(name)
 
-  # A new tree, and its root. A block becomes an Outputs::Summary - called with `percent:`
+  # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
   # and `message:` as the tree changes. See `subtask` for `autofinish`
   def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, &summary)
     @log = log
     @path = [].freeze
-    [*outputs, (Outputs::Summary.new(&summary) if summary)].compact.each { @log.add_output(it) }
+    [*outputs, (SummaryOutput.new(&summary) if summary)].compact.each { @log.add_output(it) }
     @log.transaction do |tx|
       tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:))
       tx.state[[]].autofinish = autofinish

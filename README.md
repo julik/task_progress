@@ -68,7 +68,7 @@ and draw it with the browser client that ships in `js/` (`TaskProgress.js_path`)
 <div data-controller="task-tree" data-task-tree-url-value="/jobs/42/progress"></div>
 ```
 
-For a job that runs elsewhere, publish its batches to a stream (`Outputs::Publish`, made for Sossego) and serve that.
+For a job that runs elsewhere, publish its batches to a stream (`PublishingOutput`, made for Sossego) and serve that.
 
 ## Across processes
 

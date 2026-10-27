@@ -16,7 +16,7 @@ class TaskProgress
   #   fail   an error hash, see Wire.error_to_h
   #   cancel a reason, or nil - the work was called off, and did not fail
   #   prune  nil - drop every descendant of the node
-  #   put    a whole node, see State::Node#to_h - what a squashed log is made of
+  #   put    a whole node, see Node#to_h - what a squashed log is made of
   #   say    a line to print, which changes nothing in the tree - so a squash drops it, the
   #          way a terminal's scrollback is gone once a program exits
   Event = Data.define(:path, :op, :value) do

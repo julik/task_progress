@@ -26,7 +26,7 @@ A tree of tasks lives in a **log**. Nothing in the tree is changed directly: eve
 
 The tree as it stands is what you get by folding every batch, in order. A batch with `prev` 0 starts over from nothing, which is how a **squash** announces itself: the whole tree so far as one batch, which is what a reader that joins late starts from. Folding the squash gives back the same tree.
 
-**Outputs** get every batch, in order, outside the lock - so a slow output never holds up a worker that is waiting for the lock, though it does hold up whoever committed (wrap it in `Outputs::Buffered` if that matters). A terminal redraw, a pipe to a parent process, an SSE stream to a browser and a Sossego stream are all outputs.
+**Outputs** get every batch, in order, outside the lock - so a slow output never holds up a worker that is waiting for the lock, though it does hold up whoever committed (wrap it in `BufferedOutput` if that matters). A terminal redraw, a pipe to a parent process, an SSE stream to a browser and a Sossego stream are all outputs.
 
 A task is named by its **path** from the root: `[]` is the root, `["x3k0", "00af"]` a child of the root's child `x3k0`. Each id is four random base36 characters, unique among its siblings, and never reused within a log - so a path is a sound key for a React row, and a pruned task's path never turns up on another one. A handle (`TaskProgress`) is just a log and a path: cheap to make, and equal to any other handle for the same task.
 
@@ -155,8 +155,8 @@ root = TaskProgress.cli("Import")          # or not: then finished at exit
 `cli` picks its output from where it runs:
 
 - **Spawned by `Mount#spawn`** (`TASK_PROGRESS_FD` is set): batches up the pipe, and cancel requests read from the control pipe.
-- **On a terminal**: `Outputs::Terminal`.
-- **Piped, or on a terminal with `CI` set**: `Outputs::ExecutionLog`.
+- **On a terminal**: `TerminalOutput`.
+- **Piped, or on a terminal with `CI` set**: `ExecutionLogOutput`.
 - **`quiet: true`**: nothing.
 
 ### Terminal
@@ -191,13 +191,13 @@ An output that raises does not stop the others; `log.on_output_error = ->(error,
 
 | Output | |
 |---|---|
-| `Outputs::Terminal.new(io, interval: 0.1, erase: false)` | The redrawn tree. `interval: nil` redraws on every batch, with no thread. |
-| `Outputs::ExecutionLog.new(io, interval: 3, heartbeat: 60)` | Finished lines, for CI and pipes. |
-| `Outputs::Summary.new { \|percent:, message:\| }` | The root's percent and the latest thing said, called only when either changes. For a progress column in a database. |
-| `Outputs::NDJSON.new(io)` | One batch per line, for a Mount at the other end of a pipe. |
-| `Outputs::Publish.new(stream, event_name: "task_progress")` | Each batch as a JSON-ready Hash to anything with `publish(name, payload)` - a Sossego stream. |
-| `Outputs::Buffered.new(output, interval: 0.25)` | A thread between the log and a slow output. What piles up while it works goes out squashed into one batch: the prunes, then a put for every node touched. |
-| `Outputs::Ractor.new(port)` | Each batch as a deep frozen copy to a `Ractor::Port`. Ruby 4.0 only. |
+| `TerminalOutput.new(io, interval: 0.1, erase: false)` | The redrawn tree. `interval: nil` redraws on every batch, with no thread. |
+| `ExecutionLogOutput.new(io, interval: 3, heartbeat: 60)` | Finished lines, for CI and pipes. |
+| `SummaryOutput.new { \|percent:, message:\| }` | The root's percent and the latest thing said, called only when either changes. For a progress column in a database. |
+| `NDJSONOutput.new(io)` | One batch per line, for a Mount at the other end of a pipe. |
+| `PublishingOutput.new(stream, event_name: "task_progress")` | Each batch as a JSON-ready Hash to anything with `publish(name, payload)` - a Sossego stream. |
+| `BufferedOutput.new(output, interval: 0.25)` | A thread between the log and a slow output. What piles up while it works goes out squashed into one batch: the prunes, then a put for every node touched. |
+| `RactorOutput.new(port)` | Each batch as a deep frozen copy to a `Ractor::Port`. Ruby 4.0 only. |
 | `TaskProgress::SSE` | Not an output but a Rack body - see [Server-Sent Events](#server-sent-events). |
 
 `puts` lines travel as a `say` event, which changes nothing in the tree: a squash drops them, the way a terminal's scrollback is gone once a program exits. The terminal and the execution log print them; a mount and a buffer pass them on.
@@ -244,13 +244,13 @@ A batch already applied is a duplicate - ordinary after a reconnect. One that do
 ```ruby
 port = Ractor::Port.new
 Ractor.new(port) do |port|
-  root = TaskProgress.new("worker", outputs: [TaskProgress::Outputs::Ractor.new(port)])
+  root = TaskProgress.new("worker", outputs: [TaskProgress::RactorOutput.new(port)])
   ...
 end
 mount << port.receive
 ```
 
-Ractors need Ruby 4.0. On 3.4 they corrupt the VM - a `super` into a C constructor while Ractors run brings the process down, sometimes minutes later - so `Outputs::Ractor` refuses to start there. Everything else runs on 3.4.
+Ractors need Ruby 4.0. On 3.4 they corrupt the VM - a `super` into a C constructor while Ractors run brings the process down, sometimes minutes later - so `RactorOutput` refuses to start there. Everything else runs on 3.4.
 
 ## Canceling
 
@@ -381,7 +381,7 @@ self.response_body = TaskProgress::SSE.new(task)
 
 First the tree so far, squashed into one batch with `prev` 0, then every batch as it commits - each in a `batch` event whose `id:` is its seq. A browser that reconnects starts over from a fresh squash, which is always right and costs a few puts. It pings every `heartbeat:` seconds (15) while nothing happens, and ends once the task it streams has finished. Given a subtask, it streams only that branch.
 
-The tree must live in the serving process. For one that lives in a job elsewhere, have the job publish to a stream (`Outputs::Publish`) and serve that.
+The tree must live in the serving process. For one that lives in a job elsewhere, have the job publish to a stream (`PublishingOutput`) and serve that.
 
 ## The browser client
 
@@ -489,7 +489,7 @@ Reading is for writers we do not trust - a subprocess, a stream relayed from els
 
 ## Testing
 
-- `Outputs::Terminal.new(io, interval: nil)` redraws on every batch, with no thread. `term.lines(snapshot)` gives the lines without the terminal control.
+- `TerminalOutput.new(io, interval: nil)` redraws on every batch, with no thread. `term.lines(snapshot)` gives the lines without the terminal control.
 - `TaskProgress::Log.new(clock: -> { t += 1.0 })` makes times predictable, and `random: Random.new(1)` task ids.
 - `root.log.snapshot` is the tree as it stands, and `TaskProgress::State.fold(events)` folds events of your own.
 - An output is any lambda: `root.add_output { |batch, _| batches << batch }`.
@@ -507,7 +507,7 @@ Reading is for writers we do not trust - a subprocess, a stream relayed from els
 | Six levels deep | Weighted means all the way down. |
 | Nothing to count | Indeterminate tasks: spinners, elapsed time, the latest note. |
 | Transactions | Each step hands over to the next in one batch, so no frame shows two running, or none. |
-| Squashed relay | A tree relayed through `Outputs::Buffered` and `Outputs::Publish` into a mount, as a job publishing to Sossego would. |
+| Squashed relay | A tree relayed through `BufferedOutput` and `PublishingOutput` into a mount, as a job publishing to Sossego would. |
 | Gap, stale, recover | A mount loses a batch, goes stale, and recovers from a fresh squash. |
 | Ractors | Four Ractors, each mounted here. Ruby 4.0. |
 

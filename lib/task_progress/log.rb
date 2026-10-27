@@ -10,7 +10,7 @@ class TaskProgress
   #
   # Outputs get the batches strictly in order, but outside that lock: a worker never waits on
   # another's output while it holds the tree. Delivery is synchronous to whoever committed, so
-  # a slow output slows its committer down - wrap it in Outputs::Buffered when it must not
+  # a slow output slows its committer down - wrap it in BufferedOutput when it must not
   class Log
     attr_reader :id, :seq
 
@@ -122,26 +122,6 @@ class TaskProgress
 
     def inspect = "#<#{self.class} #{@id} seq=#{@seq}>"
 
-    class Transaction
-      attr_reader :events, :journal, :at, :state
-
-      def initialize(state, at, random)
-        @state = state
-        @at = at
-        @random = random
-        @events = []
-        @journal = State::Journal.new
-      end
-
-      def <<(event)
-        @state.apply(event, at: @at, journal: @journal)
-        @events << event
-        self
-      end
-
-      def new_child(path) = @state.new_child(path, @random)
-    end
-
     private
 
     def current = Thread.current[:task_progress_transactions]&.[](self)
@@ -197,5 +177,27 @@ class TaskProgress
         end
       end
     end
+  end
+
+  # What a block given to Log#transaction adds its events through. Each one is applied to the
+  # tree as it comes, and journaled, so the whole transaction can be undone if the block raises
+  class Transaction
+    attr_reader :events, :journal, :at, :state
+
+    def initialize(state, at, random)
+      @state = state
+      @at = at
+      @random = random
+      @events = []
+      @journal = Journal.new
+    end
+
+    def <<(event)
+      @state.apply(event, at: @at, journal: @journal)
+      @events << event
+      self
+    end
+
+    def new_child(path) = @state.new_child(path, @random)
   end
 end

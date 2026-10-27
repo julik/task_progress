@@ -14,7 +14,7 @@ class TaskProgress
   #   self.response_body = TaskProgress::SSE.new(task)
   #
   # The tree must live in the serving process. For one that lives in a job elsewhere, have the
-  # job publish to a stream (Outputs::Publish) and serve that
+  # job publish to a stream (PublishingOutput) and serve that
   class SSE
     HEADERS = {"content-type" => "text/event-stream", "cache-control" => "no-cache", "x-accel-buffering" => "no"}.freeze
 

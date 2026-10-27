@@ -18,7 +18,7 @@ class RactorTest < Minitest::Test
 
     ractors = mounts.each_index.map do |n|
       Ractor.new(port, n) do |port, n|
-        root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::Outputs::Ractor.new(port)])
+        root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::RactorOutput.new(port)])
         begin
           root.run do
             root.subtask("Crunch", total: 50) { |t| 50.times { t.tick! } }
@@ -56,7 +56,7 @@ class RactorTest < Minitest::Test
     sink = Object.new
     def sink.send(value) = @sent = value
     def sink.sent = @sent
-    TaskProgress::Outputs::Ractor.new(sink).call(batch, nil)
+    TaskProgress::RactorOutput.new(sink).call(batch, nil)
     assert Ractor.shareable?(sink.sent)
     refute batch.events.first.value.frozen?, "the original is left alone"
   end
@@ -65,7 +65,7 @@ end
 class RactorGateTest < Minitest::Test
   def test_ractor_output_refuses_to_run_before_ruby_4
     skip "on Ruby #{RUBY_VERSION} Ractors are supported" if TaskProgress::RACTORS
-    error = assert_raises(NotImplementedError) { TaskProgress::Outputs::Ractor.new(Object.new) }
+    error = assert_raises(NotImplementedError) { TaskProgress::RactorOutput.new(Object.new) }
     assert_match(/Ruby 4\.0/, error.message)
   end
 end

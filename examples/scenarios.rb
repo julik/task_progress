@@ -103,12 +103,12 @@ module Scenarios
     end
   end
 
-  define "relay", "Squashed relay", "A tree in the background is relayed through Outputs::Buffered (0.5s windows) and Outputs::Publish into a mount - like a job publishing to a Sossego stream. Each window arrives as one squashed batch of puts." do |speed:|
+  define "relay", "Squashed relay", "A tree in the background is relayed through BufferedOutput (0.5s windows) and PublishingOutput into a mount - like a job publishing to a Sossego stream. Each window arrives as one squashed batch of puts." do |speed:|
     nap = napper(speed)
     served = TaskProgress.new("Relayed")
     mount = served.mount("Background job (relayed)")
     stream = Struct.new(:mount) { def publish(_name, payload) = mount << payload }.new(mount)
-    buffered = TaskProgress::Outputs::Buffered.new(TaskProgress::Outputs::Publish.new(stream), interval: 0.5 / speed)
+    buffered = TaskProgress::BufferedOutput.new(TaskProgress::PublishingOutput.new(stream), interval: 0.5 / speed)
     source = TaskProgress.new("source", outputs: [buffered])
     background(served) do
       source.run do
@@ -158,7 +158,7 @@ if TaskProgress::RACTORS
       port = Ractor::Port.new
       ractors = mounts.each_index.map do |n|
         Ractor.new(port, n, speed) do |port, n, speed|
-          root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::Outputs::Ractor.new(port)])
+          root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::RactorOutput.new(port)])
           root.run do
             root.subtask("Crunch", total: 40) { |t| 40.times { t.tick! && sleep(rand(0.01..0.06) / speed) } }
           end

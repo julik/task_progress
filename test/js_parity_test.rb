@@ -21,7 +21,7 @@ class JsParityTest < Minitest::Test
     10.times do |seed|
       rng = Random.new(seed)
       io = StringIO.new
-      root = TaskProgress.new("root", outputs: [TaskProgress::Outputs::NDJSON.new(io)], expect: rng.rand(0..2))
+      root = TaskProgress.new("root", outputs: [TaskProgress::NDJSONOutput.new(io)], expect: rng.rand(0..2))
       live = [root]
       300.times do
         task = live.sample(random: rng)

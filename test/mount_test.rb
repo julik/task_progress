@@ -149,7 +149,7 @@ class MountTest < Minitest::Test
 
   def test_a_hash_straight_from_publish_applies_without_a_json_round_trip
     mount = TaskProgress.new("web").mount("Job")
-    child = TaskProgress.new("job", outputs: [TaskProgress::Outputs::Publish.new(Struct.new(:mount) { def publish(_, payload) = mount << payload }.new(mount))])
+    child = TaskProgress.new("job", outputs: [TaskProgress::PublishingOutput.new(Struct.new(:mount) { def publish(_, payload) = mount << payload }.new(mount))])
     child.subtask("A") { it.update_to(percent: 50) }
     assert_equal :done, mount.task.subtasks.first.status
   end
@@ -157,7 +157,7 @@ class MountTest < Minitest::Test
   def test_a_squashed_run_relayed_as_a_hash_applies_too
     mount = TaskProgress.new("web").mount("Job")
     stream = Struct.new(:mount) { def publish(_, payload) = mount << payload }.new(mount)
-    buffered = TaskProgress::Outputs::Buffered.new(TaskProgress::Outputs::Publish.new(stream), interval: 0.05)
+    buffered = TaskProgress::BufferedOutput.new(TaskProgress::PublishingOutput.new(stream), interval: 0.05)
     child = TaskProgress.new("job", outputs: [buffered])
     child.subtask("A") { |a| 20.times { a.update_to(percent: it) } }
     child.done!
@@ -247,7 +247,7 @@ class MountTest < Minitest::Test
 
   def test_a_mount_follows_ndjson_off_an_io
     io = StringIO.new
-    child = TaskProgress.new("child", outputs: [TaskProgress::Outputs::NDJSON.new(io)])
+    child = TaskProgress.new("child", outputs: [TaskProgress::NDJSONOutput.new(io)])
     child.subtask("A") { it.update_to(percent: 50) }
     mount = TaskProgress.new("local").mount("Engine")
     mount.follow(StringIO.new(io.string))
