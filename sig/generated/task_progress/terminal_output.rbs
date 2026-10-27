@@ -90,6 +90,10 @@ class TaskProgress
     # : (State, path, Node) -> String?
     def measure: (State, path, Node) -> String?
 
+    # Diagonal stripes that crawl one cell along every frame - for work with no measure
+    # : () -> String
+    def stripes: () -> String
+
     # : (Integer) -> String
     def bar: (Integer) -> String
 

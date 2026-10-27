@@ -176,9 +176,9 @@ class TaskProgress
       return nil if node.status == :done && path.length.positive?
       percent = snapshot.percent(path)
       if node.children.empty? && node.indeterminate
-        if node.count.positive?
-          (node.unit == "bytes") ? TaskProgress.human_bytes(node.count) : node.count.to_s
-        end
+        counted = ((node.unit == "bytes") ? TaskProgress.human_bytes(node.count) : node.count.to_s) if node.count.positive?
+        # A barber pole while it runs, a full bar once it is through
+        [(node.status == :active) ? stripes : bar(percent), counted].compact.join(" ")
       elsif node.children.empty? && (total = node.total)
         count = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(node.count)} / #{TaskProgress.human_bytes(total)}" : "#{node.count}/#{total}"
         "#{bar(percent)} #{count}"
@@ -186,6 +186,10 @@ class TaskProgress
         format("%s %3d%%", bar(percent), percent)
       end
     end
+
+    # Diagonal stripes that crawl one cell along every frame - for work with no measure
+    #: () -> String
+    def stripes = Array.new(BAR) { ((it - @frame) % 6 < 3) ? "╱" : "░" }.join
 
     #: (Integer) -> String
     def bar(percent)

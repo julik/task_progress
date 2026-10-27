@@ -146,7 +146,7 @@ class OutputsTest < Minitest::Test
     last = frames.last.lines.map(&:chomp)
     assert_match(/\A⠋ Import  █+░+  13%/, last[0])
     assert_match(/\A  ⠋ Rows  █{5}░+ 50\/200  .*row 50\z/, last[1])
-    assert_match(/\A  ⠋ Waiting  6.0s  for the API\z/, last[2])
+    assert_match(/\A  ⠋ Waiting  [╱░]{20}  6.0s  for the API\z/, last[2], "a barber pole for work with no measure")
     assert_operator frames.length, :>, 1
   end
 
