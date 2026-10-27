@@ -3,6 +3,7 @@
 require "erb"
 require "json"
 require "rack"
+require "securerandom"
 require "assiette"
 require_relative "../scenarios"
 
@@ -13,8 +14,11 @@ require_relative "../scenarios"
 #   GET  /scenarios              what can be started
 #   GET  /jobs                   the jobs started lately, newest first
 #   POST /jobs?scenario=&speed=  starts one
-#   POST /jobs/:id/cancel        raises Interrupt in its thread; with ?path= (task ids joined with "/")
-#                                it calls that one task off instead, if it is cancelable
+#   POST /jobs/:id/cancel        raises Interrupt in its thread - the bench's own "Cancel job"
+#   POST /jobs/:id/cancellations creates the cancellation of one task: JSON {path, token}, `path`
+#                                its ids joined with "/" and `token` the job's cancel_token. Asking
+#                                again for the same task gives back the same cancellation
+#   GET  /jobs/:id/cancellations/:id   one cancellation, and how it went
 #   GET  /jobs/:id/events        its tree as SSE; with ?drop_after=N the stream is cut after N
 #                                frames, so the browser has to reconnect and resume
 class BenchApp
@@ -23,12 +27,21 @@ class BenchApp
   KEEP = 30
 
   # `number` counts jobs as they start - the order to list and evict them in, wall clock or not
-  Job = Data.define(:id, :number, :scenario, :root, :thread)
+  Job = Data.define(:id, :number, :scenario, :root, :thread, :cancellations)
+
+  # A request to cancel one task. `state` is where it got to: "canceled", "requested" while a
+  # child process has been asked and has not answered down the stream yet, or "moot" - the task
+  # had already ended, or the process it ran in had gone, by the time the request arrived
+  Cancellation = Struct.new(:id, :path, :state, :requested_at) do
+    def to_h = {id:, path: path.join("/"), state:, requested_at:}
+  end
+  STATES = {canceled: "canceled", forwarded: "requested", moot: "moot"}.freeze
 
   def initialize
     @jobs = {}
     @started = 0
     @lock = Mutex.new
+    @tokens = TaskProgress::CancelToken.new(SecureRandom.hex(32))
     @assets = Assiette::AssetHandler.new(root: PUBLIC, additional_directory_mappings: {"/task_progress" => TaskProgress.js_path})
     @app = Assiette::Server.new(method(:route), @assets)
   end
@@ -54,7 +67,7 @@ class BenchApp
       speed = Float(request.params.fetch("speed", "1"), exception: false)&.clamp(0.1, 100) || 1.0
       root, thread = scenario.start.call(speed:)
       job = @lock.synchronize do
-        Job.new(id: root.log.id, number: @started += 1, scenario: scenario.id, root:, thread:).tap do |job|
+        Job.new(id: root.log.id, number: @started += 1, scenario: scenario.id, root:, thread:, cancellations: {}).tap do |job|
           @jobs[job.id] = job
           @jobs.delete(@jobs.values.min_by(&:number).id) while @jobs.size > KEEP
         end
@@ -62,15 +75,14 @@ class BenchApp
       json(describe(job), 201)
     in ["POST", %r{\A/jobs/(\w+)/cancel\z}]
       job = find($1) or return json({error: "no such job"}, 404)
-      if (path = request.params["path"])
-        # Only what the tree offered can be called off - the browser is not trusted to decide
-        task = job.root.find(path) or return json({error: "no such task"}, 404)
-        return json({error: "not cancelable"}, 409) unless task.cancelable?
-        task.cancel!("Canceled from the browser")
-      elsif job.thread.alive?
-        job.thread.raise(Interrupt, "Cancelled from the bench")
-      end
+      job.thread.raise(Interrupt, "Cancelled from the bench") if job.thread.alive?
       json(describe(job))
+    in ["POST", %r{\A/jobs/(\w+)/cancellations\z}]
+      cancel(request, $1)
+    in ["GET", %r{\A/jobs/(\w+)/cancellations/([\w.]+)\z}]
+      job = find($1)
+      cancellation = job&.cancellations&.[]($2) or return json({error: "no such cancellation"}, 404)
+      json(settle(job, cancellation).to_h)
     in ["GET", %r{\A/jobs/(\w+)/events\z}]
       job = find($1) or return [404, {}, ["no such job"]]
       drop_after = Integer(request.params["drop_after"], exception: false)
@@ -91,7 +103,40 @@ class BenchApp
   def describe(job)
     root = job.root
     {id: job.id, scenario: job.scenario, events: "/jobs/#{job.id}/events", status: root.status,
-     percent: root.percent, number: job.number}
+     percent: root.percent, number: job.number,
+     cancellations: "/jobs/#{job.id}/cancellations", cancel_token: @tokens.issue(job.id, expires_in: 3600)}
+  end
+
+  # The token is checked before anything else, and it names the job, so it holds even for a job
+  # that is gone. What can be canceled is the tree's to say, never the browser's: the request only
+  # names a task, and the tree decides - in one transaction, so a task finishing as the request
+  # arrives makes it moot rather than an error
+  def cancel(request, job_id)
+    params = request.media_type == "application/json" ? (JSON.parse(request.body.read) rescue {}) : request.params
+    return json({error: "invalid or expired token"}, 403) unless params.is_a?(Hash) && @tokens.verify(params["token"]) == job_id
+    path = params["path"].to_s.split("/")
+    return json({error: "malformed path"}, 422) unless path.length <= TaskProgress::Wire::MAX_DEPTH && path.all? { it.match?(TaskProgress::Wire::SEGMENT) }
+
+    id = path.empty? ? "root" : path.join(".")
+    job = find(job_id) or return json(Cancellation.new(id, path, "moot", Time.now.to_f).to_h, 201)
+    @lock.synchronize do
+      if (existing = job.cancellations[id])
+        return [200, {"content-type" => "application/json", "location" => "/jobs/#{job_id}/cancellations/#{id}"}, [JSON.generate(settle(job, existing).to_h)]]
+      end
+      outcome = job.root.request_cancel(path, "Canceled from the browser")
+      return json({error: "not cancelable"}, 409) if outcome == :refused
+      cancellation = job.cancellations[id] = Cancellation.new(id, path, STATES.fetch(outcome), Time.now.to_f)
+      # A child answers down the stream, if it answers: the cancel arriving in the tree settles it
+      job.root.find(path)&.on_cancel { cancellation.state = "canceled" } if outcome == :forwarded
+      [201, {"content-type" => "application/json", "location" => "/jobs/#{job_id}/cancellations/#{id}"}, [JSON.generate(cancellation.to_h)]]
+    end
+  end
+
+  # A child that was asked may have finished the task before the request reached it
+  def settle(job, cancellation)
+    task = job.root.find(cancellation.path)
+    cancellation.state = "moot" if cancellation.state == "requested" && (task.nil? || (task.finished? && !task.canceled?))
+    cancellation
   end
 
   def json(data, status = 200) = [status, {"content-type" => "application/json"}, [JSON.generate(data)]]

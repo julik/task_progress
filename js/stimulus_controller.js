@@ -8,9 +8,10 @@ import { rowView, CANCEL_ICON } from "./row_view.js"
 // the rows the batches in that frame touched. Fires task-tree:render after every draw.
 //
 // A cancelable task gets a cancel button. Pressing it fires task-tree:cancel with the task's
-// path, and - unless that is prevented - posts the path to the cancel-url value, if there is one
+// path, and - unless that is prevented - creates a cancellation at the cancel-url value, if there
+// is one, signed with the cancel-token value
 export default class extends Controller {
-  static values = { url: String, cancelUrl: String }
+  static values = { url: String, cancelUrl: String, cancelToken: String }
 
   urlValueChanged(url) {
     this.following?.close()
@@ -55,7 +56,8 @@ export default class extends Controller {
     const { defaultPrevented } = this.dispatch("cancel", { detail: { path: row.path, name: row.name }, cancelable: true })
     if (defaultPrevented || !this.cancelUrlValue) return
     button.disabled = true // until the cancel comes down the stream, or the server says no
-    requestCancel(this.cancelUrlValue, row.path).then((response) => { if (!response.ok) button.disabled = false })
+    requestCancel(this.cancelUrlValue, row.path, { token: this.cancelTokenValue })
+      .then((response) => { if (!response.ok) button.disabled = false }, () => { button.disabled = false })
   }
 
   // Writes only what differs from the last draw, so an unchanged row costs no DOM work

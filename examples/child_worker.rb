@@ -12,7 +12,7 @@ entries = %w[chapter01.xhtml chapter02.xhtml chapter03.xhtml cover.jpg figure-1.
 
 TaskProgress.cli("engine (pid #{Process.pid})") do |root|
   unpack = root.subtask("Unpacking", total: 4 * 1024 * 1024, unit: "bytes")
-  marks = root.subtask("Watermarking", total: entries.length, weight: 3)
+  marks = root.subtask("Watermarking", total: entries.length, weight: 3, cancelable: true) # from the parent too, over the control pipe
   repack = root.subtask("Repacking")
 
   unpack.run { 16.times { unpack.advance!(256 * 1024) && nap.(0.05) } }

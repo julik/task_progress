@@ -18,6 +18,9 @@ class TaskProgress
     def initialize(log, path)
       @log = log
       @path = path
+      @control = nil
+      @control_lock = Mutex.new
+      @pid_lock = Mutex.new
       @source = nil
       @last_seq = nil
       @stale = false
@@ -67,25 +70,26 @@ class TaskProgress
 
     # Runs a command with TASK_PROGRESS_FD pointing at a pipe, follows it until it exits, and
     # returns its Process::Status. A child that exits without finishing its root fails the mount.
-    # Interrupted (Ctrl-C, a timeout), it terminates the child and cancels or fails the mount. So
-    # does the mount being canceled or failed from here - by `cancel!` on a task above it, say -
-    # while the child is still at it
-    def spawn(*command, **options)
+    #
+    # A second pipe, TASK_PROGRESS_CONTROL_FD, carries cancel requests the other way, so tasks in
+    # the child can be canceled from here - see #request_cancel; TaskProgress.cli reads it. When
+    # the mount itself is canceled, the child is asked to cancel its root, and is sent TERM if it
+    # is still running `grace` seconds later. Interrupted (Ctrl-C, a timeout), it terminates the
+    # child at once
+    def spawn(*command, grace: 5, **options)
       reader, writer = IO.pipe
+      control_reader, @control = IO.pipe
       env = command.first.is_a?(Hash) ? command.shift : {}
       status = nil
-      pid = Process.spawn({**env, "TASK_PROGRESS_FD" => "3"}, *command, 3 => writer, **options)
+      @reaped = false
+      pid = Process.spawn({**env, "TASK_PROGRESS_FD" => "3", "TASK_PROGRESS_CONTROL_FD" => "4"}, *command,
+        3 => writer, 4 => control_reader, **options)
       writer.close
-      stop = ->(batch, _log) do
-        next if @remote_ended || batch.events.none? { it.path == @path && (it.op == :cancel || it.op == :fail) }
-        Process.kill(:TERM, pid)
-      rescue Errno::ESRCH
-        nil
-      end
-      @log.add_output(stop, replay: false)
+      control_reader.close
+      @controlled = true
+      task.on_cancel { stop(pid, grace) unless @remote_ended }
       follow(reader)
-      @log.remove_output(stop) # before the child is reaped, so its pid is never signaled once reused
-      _, status = Process.wait2(pid)
+      status = reap(pid)
       fail!("#{File.basename(command.first.to_s)} exited with #{status.exitstatus || status.termsig}") unless status.success?
       fail!("#{File.basename(command.first.to_s)} exited without finishing") unless finished?
       status
@@ -96,13 +100,28 @@ class TaskProgress
       fail!(e)
       raise
     ensure
-      @log.remove_output(stop) if stop
+      @controlled = false
+      @control_lock.synchronize { @control&.close unless @control&.closed? }
       reader&.close
       writer&.close unless writer&.closed?
       if pid && status.nil?
-        Process.kill(:TERM, pid) rescue Errno::ESRCH
-        Process.wait(pid) rescue Errno::ECHILD
+        signal(pid, :TERM)
+        reap(pid)
       end
+    end
+
+    # Passes a cancel request on to the child, for the task at `path` in its own tree. Returns
+    # :forwarded, or :moot when there is no child to ask any more - it has exited, or this mount
+    # was never spawned. Whether the child cancels anything shows up the stream, if it does
+    def request_cancel(path, reason = nil)
+      line = JSON.generate({cancel: path, reason:}.compact) + "\n"
+      @control_lock.synchronize do
+        return :moot if @control.nil? || @control.closed?
+        @control.write_nonblock(line) # a child too stuck to read its requests is past asking
+      end
+      :forwarded
+    rescue IO::WaitWritable, IOError, SystemCallError
+      :moot
     end
 
     # The parent may still end the subtree - when the remote went away, say
@@ -153,8 +172,9 @@ class TaskProgress
         path = [*@path, *event.path]
         return nil if path.length > Wire::MAX_DEPTH
         value = (event.op == :put) ? rebased(event.value, offset) : event.value
-        # A remote's own tasks cannot be called off from here - nothing carries a cancel back to it
-        value = value.except(:cancelable) if %i[open meta put].include?(event.op)
+        # Without a control pipe nothing carries a cancel back to the remote, so none of its own
+        # tasks can be offered for cancelling from here
+        value = value.except(:cancelable) if !@controlled && %i[open meta put].include?(event.op)
         next Event.new(path:, op: event.op, value:) unless event.path.empty?
         case event.op
         when :open, :meta then Event.new(path:, op: :meta, value: value.except(:name, :weight))
@@ -162,6 +182,34 @@ class TaskProgress
         else Event.new(path:, op: event.op, value:)
         end
       end
+    end
+
+    # Asks the child to cancel its root, and sends TERM if it has not exited `grace` seconds on
+    def stop(pid, grace)
+      request_cancel([], task.message)
+      Thread.new do
+        sleep(grace)
+        signal(pid, :TERM)
+      end
+    end
+
+    # The pid is only ever signaled while it is still ours: reaping and signaling share a lock, so
+    # a signal can never reach another process that was given the pid after ours exited
+    def signal(pid, name)
+      @pid_lock.synchronize { Process.kill(name, pid) unless @reaped }
+    rescue Errno::ESRCH
+      nil
+    end
+
+    def reap(pid)
+      @pid_lock.synchronize do
+        _, status = Process.wait2(pid)
+        @reaped = true
+        status
+      end
+    rescue Errno::ECHILD
+      @reaped = true
+      nil
     end
 
     TIMES = %i[opened_at started_at finished_at].freeze

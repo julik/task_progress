@@ -29,6 +29,7 @@ class TaskProgress
       @outputs = [].freeze
       @outbox = []
       @snapshot = nil
+      @on_cancel = {}
       @on_output_error = ->(error, output) { warn("TaskProgress: #{output.inspect} raised #{error.class}: #{error.message}") }
     end
 
@@ -88,6 +89,21 @@ class TaskProgress
       @lock.synchronize { @outputs = @outputs.reject { it == output || (it.is_a?(Branch) && it.output == output) }.freeze }
     end
 
+    # Calls the block with the reason once the task at `path` is canceled - at once, if it already
+    # was. A task that ends any other way drops it. The block runs on whichever thread delivers
+    # the cancel, after it has been committed: keep it short, and let it unblock the work (close a
+    # connection, raise into a thread) rather than do the work
+    def on_cancel(path, &block)
+      now = @lock.synchronize do
+        node = @state[path]
+        next false if node.nil? || (node.finished? && node.status != :canceled)
+        next node.message || true if node.status == :canceled
+        (@on_cancel[path] ||= []) << block
+        false
+      end
+      block.call(now == true ? nil : now) if now
+    end
+
     # A frozen copy of the tree, safe to read from anywhere - and from inside an output too,
     # since outputs run outside the lock
     def snapshot
@@ -137,6 +153,19 @@ class TaskProgress
       tx ? map[self] = tx : map.delete(self)
     end
 
+    def call_cancel_callbacks(batch)
+      batch.events.each do |event|
+        next unless %i[cancel done fail].include?(event.op)
+        callbacks = @lock.synchronize { @on_cancel.delete(event.path) } or next
+        next unless event.op == :cancel
+        callbacks.each do |callback|
+          callback.call(event.value)
+        rescue => e
+          @on_output_error.call(e, callback)
+        end
+      end
+    end
+
     def commit_locked(tx)
       return if tx.events.empty?
       batch = Batch.new(log: @id, prev: @seq, seq: @seq + 1, at: tx.at, events: tx.events.freeze)
@@ -161,6 +190,7 @@ class TaskProgress
             rescue => e
               @on_output_error.call(e, output)
             end
+            call_cancel_callbacks(batch) unless @on_cancel.empty?
             true
           end
           break unless delivered

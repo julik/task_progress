@@ -63,18 +63,55 @@ class BenchAppTest < Minitest::Test
     assert_equal "Cancelled from the bench", root.message
   end
 
-  def test_a_cancelable_task_is_called_off_by_its_path
+  def cancellation(job, path, token: job["cancel_token"])
+    response = @request.post(job["cancellations"], "CONTENT_TYPE" => "application/json", input: JSON.generate(path:, token:))
+    [response.status, (JSON.parse(response.body) rescue nil), response.headers["location"]]
+  end
+
+  def test_a_cancellation_is_created_for_a_cancelable_task
     job = start("workers", speed: 0.5)
     root = @app.jobs.find { it.id == job["id"] }.root
     sleep 0.01 until (worker = root.subtasks.first)
-    assert_equal 404, @request.post("/jobs/#{job["id"]}/cancel?path=nope").status
-    assert_equal 200, @request.post("/jobs/#{job["id"]}/cancel?path=#{worker.path.join("/")}").status
+    key = worker.path.join("/")
+
+    status, body, location = cancellation(job, key)
+    assert_equal [201, "canceled", key], [status, body["state"], body["path"]]
     assert_equal :canceled, worker.status
     assert_equal "Canceled from the browser", worker.message
-    assert_equal 409, @request.post("/jobs/#{job["id"]}/cancel?path=#{worker.path.join("/")}").status, "not twice"
-    @request.post("/jobs/#{job["id"]}/cancel?path=")
+    assert_equal({"state" => "canceled"}, JSON.parse(@request.get(location).body).slice("state"))
+
+    status, again, = cancellation(job, key)
+    assert_equal [200, body], [status, again], "asking again gives back the same cancellation"
+
+    plain = root.subtasks.last
+    assert_equal 409, cancellation(job, plain.path.join("/")).first if !plain.cancelable? && !plain.finished?
+    assert_equal 422, cancellation(job, "Not/A Path").first
+    cancellation(job, "")
     batches(job["events"])
     assert_equal :canceled, root.status
+  end
+
+  def test_a_cancellation_needs_the_jobs_own_token
+    job = start("workers", speed: 0.5)
+    other = start("workers", speed: 0.5)
+    assert_equal 403, cancellation(job, "", token: nil).first
+    assert_equal 403, cancellation(job, "", token: "#{job["cancel_token"]}x").first, "a mangled signature"
+    assert_equal 403, cancellation(job, "", token: other["cancel_token"]).first, "another job's token"
+    form = @request.post(job["cancellations"], params: {path: "", token: "nope"})
+    assert_equal 403, form.status
+    [job, other].each { cancellation(it, "") }
+  end
+
+  def test_a_cancellation_that_comes_too_late_is_moot_and_quiet
+    job = start("transaction", speed: 50)
+    batches(job["events"])
+    root = @app.jobs.find { it.id == job["id"] }.root
+    status, body, = cancellation(job, "")
+    assert_equal [201, "moot"], [status, body["state"]], "the job finished first, which is no error"
+
+    @app.instance_variable_get(:@jobs).delete(job["id"])
+    status, body, = cancellation(job, root.subtasks.first.path.join("/"))
+    assert_equal [201, "moot"], [status, body["state"]], "nor is a job that is gone"
   end
 
   def test_a_cut_stream_stops_after_so_many_frames

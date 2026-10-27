@@ -64,8 +64,28 @@ Finishing, failing and `puts` lines go out every time; notes and counts at most 
 - `run { }`: done when the block returns, failed with the error when it raises (`Interrupt` included). The error is re-raised.
 - `update_to(percent:, message:)`, `advance!(n)`, `tick!`, `note(message)`, `total=`.
 - `done!`, `fail!(error_or_message, **flags)`, `cancel!(reason)`. Each ends what is still open under the task too: `done!` with a `done`, `fail!` and `cancel!` with a `cancel` - those tasks did not fail, they were cut short.
-- `subtask(name, cancelable: true)` (and `mount(name, cancelable: true)`) tells whoever draws the tree it may offer to call the task off; the renderers in `js/` then show a cancel button. Taking the request back is the app's: `root.find(path)` gets the task, `cancelable?` says whether to honour it. Canceling a mount terminates its child process; the child's own tasks are never cancelable from the parent, as nothing carries a cancel back to it.
 - Canceling works from any thread. Whoever touches a canceled task next gets a `TaskProgress::Canceled`, which `run` takes as the end of that task's work, so the worker stops at its next tick. Ctrl-C in a `run` block cancels rather than fails.
+- `on_cancel { |reason| }`: for work that blocks, and would not touch its task until it unblocks - close the connection it waits on, raise into its thread. Called at once if the task already was canceled.
+
+## Canceling from outside
+
+A task with `cancelable: true` may be offered for canceling; the renderers in `js/` show it a cancel button. A request names a task by its path and only asks - the tree that owns the task decides, and its answer is the `cancel` event coming back up the stream:
+
+```ruby
+root.request_cancel(path, "From the browser")  # => :canceled, :forwarded, :moot or :refused
+```
+
+It decides in one transaction against the tree as it stands, so it cannot race the task finishing. A task that already ended, or is gone, is `:moot` - a request that comes too late is not an error. One under a mount is `:forwarded` down the child's control pipe, mount by mount, and the child decides in turn.
+
+Over HTTP, sign the right to cancel. `TaskProgress::CancelToken` issues an expiring HMAC token for a log, for the page that shows the tree, and verifies it when a cancellation comes back:
+
+```ruby
+tokens = TaskProgress::CancelToken.new(ENV.fetch("TASK_PROGRESS_SECRET"))
+tokens.issue(root.log.id, expires_in: 3600)        # into the page, next to the stream URL
+tokens.verify(params[:token]) == root.log.id       # when POST .../cancellations comes in
+```
+
+The bench shows it as a resource: `POST /jobs/:id/cancellations` creates the cancellation of one task, asking again gives back the same one, and its state settles to `canceled` or `moot`.
 - `iterate(collection, name, total:, step:) { |item| }`: a subtask that advances once per item and finishes with the loop. Without a block, an Enumerator.
 - `puts(message)`: a line printed above the tree. The tree does not keep it, so a reader joining later does not see it.
 - A counted task is done once its count reaches its total; pass `autofinish: false` when the total is only a guess. `done!` also finishes every task still open under it.
@@ -81,7 +101,7 @@ engine = root.mount("Engine", weight: 3)
 engine.spawn(RbConfig.ruby, "engine.rb")  # the child uses TaskProgress.cli
 ```
 
-The remote tree is grafted under the mount node by prefixing its paths, and only the mount writes under that node. Anything the remote sends is distrusted, and a batch that does not apply is dropped whole. For a Ractor, give its tree an `Outputs::Ractor.new(port)` with a `Ractor::Port`, and feed what arrives to `mount << port.receive`.
+The remote tree is grafted under the mount node by prefixing its paths, and only the mount writes under that node. A second pipe carries cancel requests down to the child, which `cli` reads; canceling the mount asks the child to cancel its root, and sends it TERM if it is still running after `grace:` seconds. Anything the remote sends is distrusted, and a batch that does not apply is dropped whole. For a Ractor, give its tree an `Outputs::Ractor.new(port)` with a `Ractor::Port`, and feed what arrives to `mount << port.receive`.
 
 Ractors need Ruby 4.0. On 3.4 they corrupt the VM (a `super` into a C constructor while Ractors run brings the process down, sometimes minutes later), so `Outputs::Ractor` refuses to start there. Everything else runs on 3.4.
 
@@ -106,7 +126,7 @@ import { followEventSourceAt, followBatches, applyBatchTo, TaskTree } from "/tas
 followEventSourceAt("/jobs/42/events", (tree, changes) => draw(tree))  // an SSE stream, drawn once a frame
 const feed = followBatches((tree) => draw(tree))                       // batches from anywhere: feed.push(batch)
 applyBatchTo(batch, tree)                                              // one batch, folded in place
-requestCancel("/jobs/42/cancel", path)                                 // posts path=ids/joined/by/slashes
+requestCancel("/jobs/42/cancellations", path, { token })              // creates a signed cancellation
 ```
 
 The terminal demo is `ruby -Ilib examples/cli_demo.rb`.

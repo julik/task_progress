@@ -10,6 +10,7 @@ require_relative "task_progress/mount"
 require_relative "task_progress/outputs"
 require_relative "task_progress/sse"
 require_relative "task_progress/refinements"
+require_relative "task_progress/cancel_token"
 
 # Hierarchical progress for task trees. A TaskProgress is a handle onto one node of a tree; the
 # tree itself is a Log of change events, applied and numbered under one lock, which outputs
@@ -41,6 +42,9 @@ class TaskProgress
   def self.cli(name = File.basename($PROGRAM_NAME), io: $stderr, quiet: false, **attributes, &block)
     output = cli_output(io:, quiet:)
     root = new(name, outputs: [output].compact, **attributes)
+    if (fd = ENV.delete("TASK_PROGRESS_CONTROL_FD"))
+      root.accept_cancel_requests(IO.new(Integer(fd), "r", autoclose: false).tap { it.close_on_exec = true })
+    end
     return finish_at_exit(root, output) unless block
     begin
       root.run(&block)
@@ -51,7 +55,8 @@ class TaskProgress
 
   def self.cli_output(io:, quiet:)
     if (fd = ENV.delete("TASK_PROGRESS_FD"))
-      Outputs::NDJSON.new(IO.new(Integer(fd), "w", autoclose: false))
+      # Not handed down to a process this one starts, which would hold the pipe open past our exit
+      Outputs::NDJSON.new(IO.new(Integer(fd), "w", autoclose: false).tap { it.close_on_exec = true })
     elsif quiet
       nil
     elsif io.tty? && !ENV["CI"] # some CI runners give a job a terminal, but nobody watches it redraw
@@ -322,12 +327,72 @@ class TaskProgress
   # from any thread. Whoever works on one of them next gets a Canceled, which `run` takes as
   # the end of that task's work. Canceling a finished task does nothing
   def cancel!(reason = nil)
-    @log.transaction do |tx|
-      next unless writable!(tx, finishing: true)
-      tx.state.open_under(@path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel) }
-      tx << Event.new(path: @path, op: :cancel, value: (TaskProgress.utf8(reason.to_s) if reason))
-    end
+    @log.transaction { |tx| writable!(tx, finishing: true) && TaskProgress.cancel_in(tx, @path, reason) }
     self
+  end
+
+  # Calls the block with the reason once this task is canceled, see Log#on_cancel. For work that
+  # blocks and so would not notice a cancel until it next touches its task:
+  #
+  #   rows.on_cancel { http.finish }
+  def on_cancel(&block)
+    @log.on_cancel(@path, &block)
+    self
+  end
+
+  # Asks for the task at `path` under this one to be canceled - the way a request from outside
+  # (a browser, a parent process) comes in. Everything is decided in one transaction against the
+  # tree as it stands, so it cannot race the task finishing. Returns:
+  #
+  #   :canceled   it was, along with everything still open under it
+  #   :forwarded  it lives in a mounted child, which was asked; its cancel comes back up the stream
+  #   :moot       there is nothing left to cancel - no such task, or it has already ended
+  #   :refused    it is not cancelable
+  #
+  # A request that comes too late is moot, not an error: by the time it arrives the task may well
+  # have finished, and its process exited
+  def request_cancel(path, reason = nil)
+    path = path.split("/") if path.is_a?(String)
+    full = [*@path, *path].freeze
+    outcome = @log.transaction do |tx|
+      node = tx.state[full]
+      next :moot if node.nil? || node.finished?
+      next :refused unless node.cancelable
+      mounted_at = (full.length - 1).downto(0).map { full[0, it] }.find { tx.state[it]&.sealed }
+      next [tx.state[mounted_at].sealed, full.drop(mounted_at.length)] if mounted_at
+      TaskProgress.cancel_in(tx, full, reason)
+      :canceled
+    end
+    return outcome unless outcome.is_a?(Array)
+    mount, remote_path = outcome
+    mount.request_cancel(remote_path, reason)
+  end
+
+  # Reads cancel requests off an IO - one JSON line each, `{"cancel": [ids], "reason": "..."}` -
+  # on a thread of its own, and hands them to `request_cancel`. This is the far end of a Mount's
+  # control pipe; anything malformed is skipped. Returns the thread, which ends at EOF.
+  #
+  # The root itself, `[]`, is what the parent mounted, and only the parent asks for it: the
+  # mount was ended there, so the root is canceled whether it is cancelable or not
+  def accept_cancel_requests(io)
+    Thread.new do
+      Thread.current.report_on_exception = false
+      io.each_line(Wire::TEXT_LIMIT) do |line|
+        request = JSON.parse(line) rescue next
+        next unless request.is_a?(Hash) && (path = request["cancel"]).is_a?(Array) && path.length <= Wire::MAX_DEPTH
+        next unless path.all? { it.is_a?(String) && it.match?(Wire::SEGMENT) }
+        path.empty? ? cancel!(Wire.text(request["reason"])) : request_cancel(path, Wire.text(request["reason"]))
+      rescue ArgumentError
+        nil
+      end
+    end
+  end
+
+  # Every task called off carries the reason, so each of them can say why it stopped
+  def self.cancel_in(tx, path, reason)
+    reason = (utf8(reason.to_s) if reason)
+    tx.state.open_under(path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel, value: reason) }
+    tx << Event.new(path:, op: :cancel, value: reason)
   end
 
   # Everything the block does to the tree lands as one batch, or none of it does
@@ -342,10 +407,11 @@ class TaskProgress
       writable!(tx)
       path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, weight:, cancelable:))
-      tx.state[path].sealed = true
+      # The node holds its Mount, so a cancel request for a task under it can be passed on
+      tx.state[path].sealed = Mount.new(@log, path)
       path
     end
-    Mount.new(@log, path)
+    @log.snapshot[path].sealed
   end
 
   # Wraps an IO so that reading it advances this task by the bytes read, see TrackedIO. The total

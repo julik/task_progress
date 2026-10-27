@@ -299,6 +299,71 @@ class TaskTest < Minitest::Test
     assert root.done?, "a canceled child does not hold back a parent that finished regardless"
   end
 
+  def test_on_cancel_lets_blocked_work_be_unblocked
+    root = TaskProgress.new("Root")
+    fetch = root.subtask("Fetch", cancelable: true)
+    gate = Queue.new
+    fetch.on_cancel { |reason| gate << reason }
+    worker = Thread.new { fetch.run { gate.pop } } # stuck, and never touches its task
+    sleep 0.02
+    root.cancel!("Not needed")
+    assert_equal "Not needed", worker.value, "the callback unblocked it, with the reason"
+    assert_equal :canceled, fetch.status
+
+    late = []
+    fetch.on_cancel { late << it }
+    assert_equal ["Not needed"], late, "registered after the cancel, it is called at once"
+  end
+
+  def test_on_cancel_is_dropped_when_the_task_ends_otherwise
+    root = TaskProgress.new("Root")
+    task = root.subtask("Task")
+    calls = []
+    task.on_cancel { calls << it }
+    task.done!
+    root.cancel!
+    task.on_cancel { calls << it }
+    assert_empty calls
+    assert_empty root.log.instance_variable_get(:@on_cancel)
+  end
+
+  def test_a_raising_on_cancel_does_not_stop_the_others
+    errors = []
+    root = TaskProgress.new("Root")
+    root.log.on_output_error = ->(e, _) { errors << e.message }
+    task = root.subtask("Task")
+    called = []
+    task.on_cancel { raise "oops" }
+    task.on_cancel { called << :second }
+    task.cancel!
+    assert_equal [:second], called
+    assert_equal ["oops"], errors
+  end
+
+  def test_request_cancel_decides_in_one_go
+    root = TaskProgress.new("Root")
+    open = root.subtask("Open", cancelable: true)
+    plain = root.subtask("Plain")
+    finished = root.subtask("Finished", cancelable: true).done!
+    assert_equal :refused, root.request_cancel(plain.path)
+    assert_equal :moot, root.request_cancel(finished.path)
+    assert_equal :moot, root.request_cancel(["nope"])
+    assert_equal :canceled, root.request_cancel(open.path.join("/"), "Asked")
+    assert_equal :moot, root.request_cancel(open.path), "a second time is moot"
+    assert_equal ["Asked", :pending], [open.message, plain.status]
+  end
+
+  def test_request_cancel_racing_a_finish_is_moot_or_canceled_never_both
+    100.times do
+      root = TaskProgress.new("Root")
+      task = root.subtask("Task", cancelable: true)
+      finisher = Thread.new { task.done! }
+      outcome = root.request_cancel(task.path)
+      finisher.join
+      assert_includes [[:canceled, :canceled], [:moot, :done]], [outcome, task.status]
+    end
+  end
+
   def test_a_task_says_whether_it_may_be_called_off
     root = TaskProgress.new("Root")
     rows = root.subtask("Rows", cancelable: true)

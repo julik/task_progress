@@ -208,11 +208,17 @@ export function followEventSourceAt(url, onChange, options = {}) {
   return { tree, close: () => { source.close(); following.close() } }
 }
 
-// Asks the server to call a task off. The server decides - a task is only ever ended by its own
-// tree - so nothing changes here until the `cancel` comes back down the stream. Posts the task's
-// path as `path`, its ids joined with "/" (see TaskProgress#find)
-export function requestCancel(url, path) {
-  return fetch(url, { method: "POST", body: new URLSearchParams({ path: path.join("/") }) })
+// Asks the server to cancel a task, by creating a cancellation: posts JSON with the task's path
+// (its ids joined with "/") and the token the server issued for this tree. The server decides -
+// a task is only ever ended by its own tree - so nothing changes here until the `cancel` comes
+// back down the stream. A request that comes too late is not an error: the server answers it as
+// "moot", and the row has already finished anyway
+export function requestCancel(url, path, { token } = {}) {
+  return fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: path.join("/"), token })
+  })
 }
 
 export function humanBytes(n) {

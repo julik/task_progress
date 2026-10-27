@@ -45,12 +45,14 @@ function Row({ row, onCancel }) {
     </div>`
 }
 
-// `cancelUrl` gets a cancelable task's path posted to it when its cancel button is pressed.
-// For anything else, pass `onCancel(row)` - return false from it to release the button
-export function TaskTreeView({ url, cancelUrl, onCancel }) {
+// `cancelUrl` gets a cancellation created at it when a cancel button is pressed, signed with
+// `cancelToken`. For anything else, pass `onCancel(row)` - return false from it to release the button
+export function TaskTreeView({ url, cancelUrl, cancelToken, onCancel }) {
   const tree = useTaskTree(url)
   if (!tree) return null
-  const cancel = onCancel ?? (cancelUrl && (async (row) => (await requestCancel(cancelUrl, row.path)).ok))
+  const cancel = onCancel ?? (cancelUrl && (async (row) => {
+    try { return (await requestCancel(cancelUrl, row.path, { token: cancelToken })).ok } catch { return false }
+  }))
   return [...tree.each()].map((node) => rowView(tree, node)).map((row) => html`<${Row} key=${row.key} row=${row} onCancel=${cancel} />`)
 }
 
