@@ -186,4 +186,11 @@ class LogTest < Minitest::Test
     assert snapshot[a.path].frozen?
     assert_raises(FrozenError) { snapshot[a.path].name = "x" }
   end
+
+  def test_ids_are_lower_case # so they cannot clash on a case-insensitive filesystem
+    root = TaskProgress.new("root")
+    20.times { root.subtask("t") }
+    assert_match(/\A[0-9a-z]{10}\z/, root.log.id)
+    root.subtasks.each { assert_match(/\A[0-9a-z]{4}\z/, it.path.last) }
+  end
 end
