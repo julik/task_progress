@@ -10,7 +10,7 @@ class ConvenienceTest < Minitest::Test
     assert bar.done?
     bar.tick! # a collection longer than its size said
     assert_equal 3, bar.count
-    assert_equal "[ 33%] Importing\n[ 67%] Importing\n[100%] Importing complete\n", io.string
+    assert_equal ["Importing 1/3", "✓ Importing  0.0s"], io.string.lines.map { it.sub(/\A\[.*?\] /, "").chomp }
   end
 
   def test_a_bar_without_a_total_counts_and_spins
@@ -21,11 +21,16 @@ class ConvenienceTest < Minitest::Test
     refute bar.finished?
   end
 
-  def test_a_tree_still_finishes_only_when_told
-    root = TaskProgress.new("root")
-    rows = root.subtask("Rows", total: 2)
-    2.times { rows.tick! }
-    refute rows.finished?
+  def test_a_bar_is_finished_when_the_program_ends
+    script = <<~RUBY
+      bar = TaskProgress.bar("Streaming", io: $stdout)
+      bar.tick!
+    RUBY
+    out = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-rtask_progress", "-e", script], &:read)
+    assert_match(/✓ Streaming/, out.lines.last)
+
+    failing = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-rtask_progress", "-e", "#{script}\nraise 'disk full'", err: File::NULL], &:read)
+    assert_match(/✗ Streaming: disk full/, failing.lines.last)
   end
 
   def test_iterate_counts_a_subtask_through_a_collection
@@ -73,7 +78,7 @@ class ConvenienceTest < Minitest::Test
     io = StringIO.new
     result = TaskProgress.iterate([1, 2, 3, 4], "Rows", io:) { nil }
     assert_equal [1, 2, 3, 4], result
-    assert_equal "[100%] Rows complete", io.string.lines.last.chomp
+    assert_match(/\A\[100% +[\d.]+s\] ✓ Rows  [\d.]+s\z/, io.string.lines.last.chomp)
   end
 
   def test_with_progress_is_there_for_files_that_ask_for_it

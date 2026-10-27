@@ -24,12 +24,12 @@ class TaskProgress
   attr_reader :log, :path
 
   # A root reporting wherever suits a command-line program: a parent process, when it handed
-  # one down in TASK_PROGRESS_FD; a redrawn tree on a terminal; plain lines otherwise. With a
-  # block, it runs the block as the root's work and returns its value
+  # one down in TASK_PROGRESS_FD; a redrawn tree on a terminal; an ExecutionLog on CI or when
+  # piped. With a block, it runs the block as the root's work and returns its value
   def self.cli(name = File.basename($PROGRAM_NAME), io: $stderr, quiet: false, **attributes, &block)
     output = cli_output(io:, quiet:)
     root = new(name, outputs: [output].compact, **attributes)
-    return root unless block
+    return finish_at_exit(root, output) unless block
     begin
       root.run(&block)
     ensure
@@ -42,10 +42,10 @@ class TaskProgress
       Outputs::NDJSON.new(IO.new(Integer(fd), "w", autoclose: false))
     elsif quiet
       nil
-    elsif io.tty?
+    elsif io.tty? && !ENV["CI"] # some CI runners give a job a terminal, but nobody watches it redraw
       Outputs::Terminal.new(io)
     else
-      Outputs::Lines.new(io)
+      Outputs::ExecutionLog.new(io)
     end
   end
 
@@ -58,8 +58,20 @@ class TaskProgress
   def self.bar(name = File.basename($PROGRAM_NAME), total: nil, io: $stderr, quiet: false, **attributes)
     output = cli_output(io:, quiet:)
     root = new(name, outputs: [output].compact, total:, indeterminate: total.nil?, **attributes)
-    root.autofinish!
-    at_exit { output.close } if output.respond_to?(:close)
+    finish_at_exit(root, output)
+  end
+
+  # A root nobody runs a block for is finished when the program ends: done if it ends well,
+  # failed with the error if it is going down with one
+  def self.finish_at_exit(root, output)
+    at_exit do
+      error = $!
+      unless root.finished?
+        (error.nil? || (error.is_a?(SystemExit) && error.success?)) ? root.done! : root.fail!(error)
+      end
+    ensure
+      output.close if output.respond_to?(:close)
+    end
     root
   end
 
@@ -82,12 +94,15 @@ class TaskProgress
   def self.null(name = "progress") = new(name)
 
   # A new tree, and its root. A block becomes an Outputs::Summary - called with `percent:`
-  # and `message:` as the tree changes
-  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, &summary)
+  # and `message:` as the tree changes. See `subtask` for `autofinish`
+  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, autofinish: true, &summary)
     @log = log
     @path = [].freeze
     [*outputs, (Outputs::Summary.new(&summary) if summary)].compact.each { @log.add_output(it) }
-    @log.append(Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:)))
+    @log.transaction do |tx|
+      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:))
+      tx.state[[]].autofinish = autofinish
+    end
   end
 
   def self.attributes(name:, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil)
@@ -118,7 +133,8 @@ class TaskProgress
 
   def failed? = status == :failed
 
-  def finished? = done? || failed?
+  # Ended, by `done!` or `fail!` - whether or not everything under it did
+  def finished? = node.finished?
 
   def parent = (TaskProgress.handle(@log, @path[0...-1]) unless @path.empty?)
 
@@ -134,12 +150,16 @@ class TaskProgress
 
   # A child task. `total:` makes it counted (drive it with `advance!`), `indeterminate: true`
   # one with no measure of its own, and `weight:` how much of the parent it is. With a block
-  # it runs the block as the child's work, see `run`, and returns the block's value
-  def subtask(name, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, &block)
+  # it runs the block as the child's work, see `run`, and returns the block's value.
+  #
+  # A counted task is done once its count reaches its total. Give it `autofinish: false` when
+  # the total is a guess, and the work may go past it
+  def subtask(name, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, autofinish: true, &block)
     child = @log.transaction do |tx|
       writable!(tx)
       path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, total:, weight:, expect:, indeterminate:, unit:))
+      tx.state[path].autofinish = autofinish
       TaskProgress.handle(@log, path)
     end
     block ? child.run(&block) : child
@@ -170,7 +190,7 @@ class TaskProgress
     @log.transaction do |tx|
       writable!(tx)
       node = tx.state[@path]
-      next if node.autofinish && node.finished? # a collection longer than its size said
+      next if node.autofinish && node.total && node.count >= node.total && node.status == :done # more work than the total said
       tx << Event.new(path: @path, op: :add, value: by)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
       tx << Event.new(path: @path, op: :done) if node.autofinish && node.total && node.count >= node.total
@@ -195,7 +215,6 @@ class TaskProgress
       task = self
       meta(total:, indeterminate: false) if total && self.total.nil?
     end
-    task.autofinish!
     # Advancing costs a transaction, so it goes in steps of a thousandth of the total - what a
     # bar can show anyway - and a loop over cheap items is not held up by its own progress
     every = total ? [total / 1000, 1].max * step : step
@@ -213,14 +232,6 @@ class TaskProgress
       end
     end
     block ? enumerator.each(&block) : enumerator
-  end
-
-  # Done once the count reaches the total, the way a lone progress bar finishes. A tree keeps to
-  # its rule that only `done!` finishes a task, since a parent can reach its count well before
-  # its children are through
-  def autofinish!
-    @log.transaction { |tx| writable!(tx) && tx.state[@path].autofinish = true }
-    self
   end
 
   # Prints a line above the tree, where it stays. It changes nothing in the tree itself, so a
@@ -243,10 +254,15 @@ class TaskProgress
     meta(name: TaskProgress.utf8(name))
   end
 
+  # Finishes the task, and with it every task under it still open - each with a `done` of its
+  # own, deepest first, in the same batch. The work they were part of is over, and a reader
+  # should not be left waiting on a task nobody will ever finish. What was mounted is left to
+  # its Mount
   def done!(message = nil)
     @log.transaction do |tx|
       next unless writable!(tx, finishing: true)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
+      still_open(tx.state).reverse_each { tx << Event.new(path: it, op: :done) }
       tx << Event.new(path: @path, op: :done)
     end
     self
@@ -306,6 +322,13 @@ class TaskProgress
   SCALE = [["TB", 1024**4], ["GB", 1024**3], ["MB", 1024**2], ["KB", 1024]].map(&:freeze).freeze
 
   # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
+  def self.duration(seconds)
+    if seconds < 60 then format("%.1fs", seconds)
+    elsif seconds < 3600 then format("%dm%02ds", seconds / 60, seconds % 60)
+    else format("%dh%02dm", seconds / 3600, seconds % 3600 / 60)
+    end
+  end
+
   def self.human_bytes(n)
     n = n.to_i
     unit, size = SCALE.find { |_, size| n >= size }
@@ -338,6 +361,18 @@ class TaskProgress
     node = tx.state[@path] or raise ArgumentError, "No task at #{@path.inspect}"
     raise ArgumentError, "Task '#{node.name}' is mounted from elsewhere - write to it through its Mount" if sealed?(tx.state)
     !(finishing && node.finished?)
+  end
+
+  # In pre-order, so reversed it gives every task before the one it is under
+  def still_open(state)
+    open = []
+    sealed = nil
+    state.each(@path).drop(1).each do |path, node|
+      next if sealed && path[0, sealed.length] == sealed
+      next sealed = path if node.sealed
+      open << path unless node.finished?
+    end
+    open
   end
 
   def sealed?(state) = (0..@path.length).any? { state[@path[0, it]]&.sealed }

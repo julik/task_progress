@@ -1,7 +1,7 @@
 // node --test examples/web/test/
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { TaskTree } from "../../js/task_tree.js"
+import { TaskTree, applyBatchTo, followBatches } from "../../js/task_tree.js"
 import { RenderQueue } from "../../js/render_queue.js"
 
 const batch = (seq, ops, prev = seq - 1) => ({ log: "w", prev, seq, at: seq, ops })
@@ -85,4 +85,25 @@ test("a closed queue draws nothing more", () => {
   frame()
   assert.equal(renders.length, 0)
   assert.equal(queue.tree.seq, 1)
+})
+
+test("applyBatchTo folds a batch into the tree in place", () => {
+  const tree = new TaskTree()
+  assert.equal(applyBatchTo({ log: "w", prev: 0, seq: 1, at: 1, ops: [[[], "open", { name: "root" }], [["a"], "open", { name: "a" }]] }, tree), "applied")
+  assert.equal(applyBatchTo({ log: "w", prev: 1, seq: 2, at: 2, ops: [[["a"], "add", 3]] }, tree), "applied")
+  assert.equal(tree.get(["a"]).count, 3)
+  assert.equal(applyBatchTo({ log: "w", prev: 1, seq: 2, at: 2, ops: [[["a"], "add", 3]] }, tree), "duplicate")
+  assert.equal(applyBatchTo({ log: "w", prev: 7, seq: 8, at: 3, ops: [] }, tree), "gap")
+  assert.equal(tree.stale, true)
+})
+
+test("followBatches folds what is pushed and draws once a frame", () => {
+  const frames = []
+  let pending = null
+  const following = followBatches((tree, changes) => frames.push([tree.get(["a"]).count, changes.batches]), { schedule: (fn) => (pending = fn) })
+  following.push({ log: "w", prev: 0, seq: 1, at: 1, ops: [[[], "open", { name: "root" }], [["a"], "open", { name: "a" }]] })
+  for (let seq = 2; seq <= 10; seq++) assert.equal(following.push({ log: "w", prev: seq - 1, seq, at: seq, ops: [[["a"], "add", 1]] }), "applied")
+  assert.equal(following.push({ log: "w", prev: 40, seq: 41, at: 41, ops: [] }), "gap")
+  pending()
+  assert.deepEqual(frames, [[9, 11]])
 })

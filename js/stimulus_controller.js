@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { follow } from "./task_tree.js"
+import { followEventSourceAt } from "./task_tree.js"
 import { rowView } from "./row_view.js"
 
 // Draws the tree from a TaskProgress SSE stream. Point it somewhere with the url value:
@@ -13,7 +13,7 @@ export default class extends Controller {
     this.following?.close()
     this.rows = new Map()
     this.element.replaceChildren()
-    if (url) this.following = follow(url, (tree, changes) => this.render(tree, changes))
+    if (url) this.following = followEventSourceAt(url, (tree, changes) => this.render(tree, changes))
   }
 
   disconnect() { this.following?.close() }

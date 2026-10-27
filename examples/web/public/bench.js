@@ -45,7 +45,7 @@ function watch(job) {
   document.querySelectorAll(".scenario").forEach((b) => b.classList.toggle("current", b.dataset.id === job.scenario))
   const url = streamUrl(job)
   $("stimulus-tree").dataset.taskTreeUrlValue = url
-  react.follow(url)
+  react.followEventSourceAt(url)
   inspector.follow(url)
 }
 

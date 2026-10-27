@@ -40,7 +40,7 @@ class SSETest < Minitest::Test
     batches = reader.value.drop(1).map { batch_of(it) }
 
     assert_equal [[], part.path.drop(1)], batches.first.events.map(&:path)
-    assert_equal [[[], :done]], batches.last.events.map { [it.path, it.op] }
+    assert_equal [[part.path.drop(1), :done], [[], :done]], batches.last.events.map { [it.path, it.op] }, "done closes Part too"
     assert_equal 2, batches.length
     refute root.finished?, "the stream ends with the subtask, not the root"
     assert_empty root.log.instance_variable_get(:@outputs)

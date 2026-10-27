@@ -11,16 +11,38 @@ class OutputsTest < Minitest::Test
     def publish(name, payload) = @published << [name, payload]
   end
 
-  def test_lines_print_one_line_per_message_and_per_tenth
+  LINE = /\A\[ *\d+% +[\d.]+s\] /
+
+  def test_an_execution_log_says_endings_at_once_and_only_the_newest_news
     io = StringIO.new
-    root = TaskProgress.new("demo", outputs: [TaskProgress::Outputs::Lines.new(io)])
-    a, _b = root.subtask("A"), root.subtask("B")
-    a.update_to(percent: 50, message: "Halfway")
-    a.update_to(percent: 52) # no new tenth
-    a.update_to(percent: 60)
+    log = TaskProgress::Outputs::ExecutionLog.new(io, interval: 0.3)
+    root = TaskProgress.new("demo", outputs: [log])
+    a, b = root.subtask("A"), root.subtask("B", total: 50)
+    20.times { a.note("note #{it}") }
     a.puts("Said")
     a.done!
-    assert_equal "[ 25%] Halfway\n[ 30%] demo\n[ 30%] Said\n[ 50%] A complete\n", io.string
+    lines = io.string.lines.map { it.sub(LINE, "").chomp }
+    assert_equal ["demo › A: note 0", "demo › A: Said", "✓ demo › A  0.0s"], lines, "the first news at once, the rest held back"
+
+    10.times { b.tick! }
+    sleep 0.45
+    assert_equal "demo › B 10/50", io.string.lines.last.sub(LINE, "").chomp, "held news goes out when the interval is up"
+    b.fail!("out of disk")
+    root.done!
+    log.close
+    assert_equal ["✗ demo › B: out of disk", "✓ demo  0.5s"], io.string.lines.last(2).map { it.sub(LINE, "").chomp.sub(/0\.\ds\z/, "0.5s") }
+    assert(io.string.lines.all? { it.match?(LINE) && it.end_with?("\n") })
+    refute_includes io.string, "\e", "never a terminal control"
+  end
+
+  def test_an_execution_log_says_it_is_still_going
+    io = StringIO.new
+    log = TaskProgress::Outputs::ExecutionLog.new(io, interval: 0.05, heartbeat: 0.2)
+    root = TaskProgress.new("demo", outputs: [log])
+    root.note("Starting")
+    sleep 0.5
+    log.close
+    assert_operator io.string.scan("demo: still going").length, :>=, 1
   end
 
   def test_ndjson_writes_lines_a_mount_can_follow
@@ -200,16 +222,20 @@ end
 
   def test_cli_picks_its_output
     tty = Class.new(StringIO) { def tty? = true }
+    ci = ENV.delete("CI")
     assert_kind_of TaskProgress::Outputs::Terminal, TaskProgress.cli_output(io: tty.new, quiet: false)
-    assert_kind_of TaskProgress::Outputs::Lines, TaskProgress.cli_output(io: StringIO.new, quiet: false)
+    ENV["CI"] = "true"
+    assert_kind_of TaskProgress::Outputs::ExecutionLog, TaskProgress.cli_output(io: tty.new, quiet: false), "nobody watches a CI terminal redraw"
+    ENV["CI"] = ci
+    assert_kind_of TaskProgress::Outputs::ExecutionLog, TaskProgress.cli_output(io: StringIO.new, quiet: false)
     assert_nil TaskProgress.cli_output(io: StringIO.new, quiet: true)
   end
 
   def test_cli_with_a_block_runs_it_and_returns_its_value
     io = StringIO.new
     assert_equal :result, TaskProgress.cli("job", io:) { |root| root.subtask("A") { :ignored } && :result }
-    assert_equal "[100%] A complete\n[100%] job complete\n", io.string
+    assert_equal ["✓ job › A", "✓ job"], io.string.lines.map { it.sub(LINE, "").sub(/  [\d.]+s$/, "").chomp }
     assert_raises(RuntimeError) { TaskProgress.cli("job", io:) { raise "boom" } }
-    assert io.string.end_with?("job failed\n")
+    assert io.string.end_with?("✗ job: boom\n")
   end
 end

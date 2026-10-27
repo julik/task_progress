@@ -1,6 +1,10 @@
 // The browser half of TaskProgress: folds batches into a tree the way TaskProgress::State
 // does, and works out percents by the same rules. Framework-free - the Stimulus and React
 // demos both sit on top of it.
+//
+//   followEventSourceAt(url, onChange)   a TaskProgress::SSE stream, drawn at most once a frame
+//   followBatches(onChange)              the same, for batches you get some other way
+//   applyBatchTo(batch, tree)            folds one batch into a tree, in place
 
 import { RenderQueue } from "./render_queue.js"
 
@@ -63,11 +67,10 @@ export class TaskTree {
     for (const child of this.childrenOf(node)) yield* this.each(child)
   }
 
+  // Done, and everything under it ended - see TaskProgress::State#complete?
   complete(node) {
-    if (!node) return false
-    if (node.status === "done") return true
-    if (node.children.length === 0 || this.#missing(node) > 0) return false
-    return this.childrenOf(node).every((child) => this.complete(child))
+    if (node?.status !== "done") return false
+    return this.childrenOf(node).every((child) => child.status === "failed" || this.complete(child))
   }
 
   fraction(node) {
@@ -165,17 +168,29 @@ export class TaskTree {
   }
 }
 
-// Follows a TaskProgress::SSE stream. Every batch goes into the tree as it arrives, and
-// onChange(tree, changes) is called at most once a frame with what they changed - see render_queue.js.
-// On a gap it reconnects, and the server starts it over from a fresh squash
-export function follow(url, onChange, { schedule } = {}) {
-  const tree = new TaskTree()
+// Folds the batch into the tree, in place. Returns "applied", "duplicate" or "gap", see TaskTree#apply
+export function applyBatchTo(batch, tree) { return tree.apply(batch) }
+
+// Folds batches pushed into it from anywhere - a WebSocket, ActionCable, a poller - and calls
+// onChange(tree, changes) at most once a frame with what they changed, see render_queue.js.
+// `push` returns what the tree made of the batch: on a "gap" it is for the caller to start
+// over, by fetching a fresh squash (a batch with prev 0)
+export function followBatches(onChange, { schedule, clock } = {}) {
+  const tree = new TaskTree(clock ? { clock } : {})
   const queue = new RenderQueue(tree, onChange, { schedule })
+  return { tree, push: (batch) => queue.apply(batch), close: () => queue.close() }
+}
+
+// Follows a TaskProgress::SSE stream at `url`, see followBatches. On a gap it reconnects, and
+// the server starts it over from a fresh squash. It stops once the root has finished
+export function followEventSourceAt(url, onChange, options = {}) {
+  const following = followBatches(onChange, options)
+  const { tree } = following
   let source
   const connect = () => {
     source = new EventSource(url)
     source.addEventListener("batch", (event) => {
-      if (queue.apply(JSON.parse(event.data)) === "gap") {
+      if (following.push(JSON.parse(event.data)) === "gap") {
         source.close()
         connect()
       }
@@ -183,7 +198,7 @@ export function follow(url, onChange, { schedule } = {}) {
     })
   }
   connect()
-  return { tree, close: () => { source.close(); queue.close() } }
+  return { tree, close: () => { source.close(); following.close() } }
 }
 
 export function humanBytes(n) {

@@ -161,19 +161,12 @@ class TaskProgress
         rate = node.count / seconds
         per = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(rate)}/s" : format((rate < 10) ? "%.1f/s" : "%d/s", rate)
         return per unless node.total && node.total > node.count
-        "#{per}  ETA #{duration((node.total - node.count) / rate)}"
+        "#{per}  ETA #{TaskProgress.duration((node.total - node.count) / rate)}"
       end
 
       def elapsed(node)
         return nil unless node.started_at
-        duration((node.finished_at || @clock.call) - node.started_at)
-      end
-
-      def duration(seconds)
-        if seconds < 60 then format("%.1fs", seconds)
-        elsif seconds < 3600 then format("%dm%02ds", seconds / 60, seconds % 60)
-        else format("%dh%02dm", seconds / 3600, seconds % 3600 / 60)
-        end
+        TaskProgress.duration((node.finished_at || @clock.call) - node.started_at)
       end
 
       def columns = size[1]

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import htm from "htm"
-import { follow } from "./task_tree.js"
+import { followEventSourceAt } from "./task_tree.js"
 import { rowView } from "./row_view.js"
 
 const html = htm.bind(React.createElement)
@@ -13,7 +13,7 @@ export function useTaskTree(url) {
   useEffect(() => {
     setState({ tree: null, version: 0 })
     if (!url) return
-    const following = follow(url, (tree) => setState((s) => ({ tree, version: s.version + 1 })))
+    const following = followEventSourceAt(url, (tree) => setState((s) => ({ tree, version: s.version + 1 })))
     return () => following.close()
   }, [url])
   return state.tree
@@ -41,5 +41,5 @@ export function TaskTreeView({ url }) {
 // For pages that are not React apps: mount into an element, then point it at streams
 export function mountTaskTree(element) {
   const root = createRoot(element)
-  return { follow: (url) => root.render(html`<${TaskTreeView} url=${url} />`) }
+  return { followEventSourceAt: (url) => root.render(html`<${TaskTreeView} url=${url} />`) }
 }

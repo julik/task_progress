@@ -108,6 +108,48 @@ class TaskTest < Minitest::Test
     assert_equal e.backtrace, task.error[:backtrace]
   end
 
+  def test_done_finishes_what_is_still_open_under_it
+    batches, output = recording
+    root = TaskProgress.new("Root", outputs: [output])
+    child = root.subtask("Child")
+    grandchild = child.subtask("Grandchild")
+    grandchild.note("started")
+    finished = root.subtask("Finished").done!
+    failed = root.subtask("Failed").fail!("nope")
+    root.done!
+
+    assert_equal [[grandchild.path, :done], [child.path, :done], [[], :done]], batches.last.events.map { [it.path, it.op] },
+      "each with a done of its own, deepest first, in one batch"
+    assert_equal [:done, :done, :done, :failed], [child, grandchild, finished, failed].map(&:status)
+    assert root.done?, "a failed child does not hold back a parent that finished regardless"
+    assert_equal 100, root.percent
+  end
+
+  def test_done_leaves_a_mounted_subtree_to_its_mount
+    root = TaskProgress.new("Root")
+    mount = root.mount("Remote")
+    remote = TaskProgress.new("remote", outputs: [->(batch, _) { mount << batch }])
+    remote.subtask("Remote work")
+    root.done!
+    assert_equal :pending, mount.task.status
+    assert_equal :pending, mount.task.subtasks.first.status
+    refute root.done?, "the remote is not through yet"
+    remote.done!
+    assert root.done?
+  end
+
+  def test_a_counted_task_finishes_at_its_total
+    root = TaskProgress.new("Root")
+    rows = root.subtask("Rows", total: 2)
+    2.times { rows.tick! }
+    assert rows.done?
+    rows.tick! # more work than the total said
+    assert_equal 2, rows.count
+    guess = root.subtask("Guess", total: 2, autofinish: false)
+    3.times { guess.tick! }
+    refute guess.finished?
+  end
+
   def test_progress_is_the_weighted_mean_of_the_children
     root = TaskProgress.new("Root")
     a, b = root.subtask("A"), root.subtask("B")
@@ -117,8 +159,11 @@ class TaskTest < Minitest::Test
     b.update_to(percent: 100)
     assert_equal 75, root.percent
     a.done!
+    assert_equal 99, root.percent, "children all through do not finish their parent"
+    refute root.done?
+    root.done!
     assert_equal 100, root.percent
-    assert root.done?, "a parent whose children are all done is done"
+    assert root.done?
   end
 
   def test_weights
@@ -167,8 +212,11 @@ class TaskTest < Minitest::Test
     assert_equal 75, root.percent
     llm.done!
     memory.done!
+    assert_equal 99, root.percent, "Email Analysis was never finished itself"
+    email.done!
+    root.done!
     assert_equal 100, root.percent
-    assert_equal({percent: 100, message: "Memory Saving complete"}, @calls.last)
+    assert_equal({percent: 100, message: "Fact Extraction complete"}, @calls.last)
   end
 
   def test_a_tree_never_rounds_up_to_100_with_work_still_running
@@ -182,7 +230,7 @@ class TaskTest < Minitest::Test
 
   def test_counted_tasks
     root = TaskProgress.new("R")
-    rows = root.subtask("Rows", total: 4)
+    rows = root.subtask("Rows", total: 4, autofinish: false) # the total is a guess
     rows.tick!
     rows.advance!(2, message: "three in")
     assert_equal 75, rows.percent
@@ -193,6 +241,8 @@ class TaskTest < Minitest::Test
     rows.total = 20
     assert_equal 40, rows.percent
     rows.done!
+    assert_equal 99, root.percent
+    root.done!
     assert_equal 100, root.percent
   end
 
@@ -203,6 +253,7 @@ class TaskTest < Minitest::Test
     waiting.note("still waiting")
     assert_equal 50, root.percent
     waiting.done!
+    root.done!
     assert root.done?
   end
 
@@ -302,6 +353,8 @@ class TaskTest < Minitest::Test
       end
     end.each(&:join)
 
+    assert_equal 99, root.percent
+    root.done!
     assert root.done?
     assert_equal (1..root.log.seq).to_a, batches.map(&:seq)
     assert(batches.each_cons(2).all? { |a, b| b.prev == a.seq })
@@ -333,7 +386,7 @@ class TaskTest < Minitest::Test
       end
     end
     fibers.each(&:resume) while fibers.any?(&:alive?)
-    assert root.done?
+    assert(root.subtasks.all?(&:done?))
     assert_equal %w[f0.0 f1.0 f2.0], messages.first(3)
     assert_equal 12, messages.length
   end

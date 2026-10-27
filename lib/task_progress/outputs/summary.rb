@@ -26,25 +26,5 @@ class TaskProgress
         @block.call(percent:, message:)
       end
     end
-
-    # One line per message, `[ 42%] Reading chapter 3`, and one each time the percent passes
-    # a tenth - so a bar that only ticks still shows it moves. Never redraws, so it stays
-    # readable when redirected to a file or piped
-    class Lines < Summary
-      def initialize(io = $stderr)
-        tenth = 0
-        super() do |percent:, message:|
-          if message || percent / 10 > tenth
-            tenth = percent / 10
-            io.puts(format("[%3d%%] %s", percent, message || @name))
-          end
-        end
-      end
-
-      def call(batch, log)
-        @name = log.snapshot[[]]&.name
-        super
-      end
-    end
   end
 end

@@ -47,7 +47,16 @@ TaskProgress.cli("Import") do |root|
 end
 ```
 
-On a terminal it redraws the tree in place. Piped, it prints one line per message and one every 10%. Spawned by a parent through `Mount#spawn`, it writes batches up the pipe instead.
+On a terminal it redraws the tree in place. Piped, or on CI, it writes an execution log instead - finished lines, never a redraw:
+
+```
+[ 31%   3.0s] Import › Rows: row 119
+[ 62%   6.0s] Import › Rows: row 245
+[100%   9.7s] ✓ Import › Rows  9.7s
+[ 67%  10.2s] ✗ Import › Engine: watermarking failed
+```
+
+Finishing, failing and `puts` lines go out every time; notes and counts at most once every 3 seconds, the newest. After a minute with nothing to say it says it is still going, so a CI runner does not take a long step for a hang. Spawned by a parent through `Mount#spawn`, it writes batches up the pipe instead.
 
 ## Tasks
 
@@ -57,11 +66,11 @@ On a terminal it redraws the tree in place. Piped, it prints one line per messag
 - `done!`, `fail!(error_or_message, **flags)`.
 - `iterate(collection, name, total:, step:) { |item| }`: a subtask that advances once per item and finishes with the loop. Without a block, an Enumerator.
 - `puts(message)`: a line printed above the tree. The tree does not keep it, so a reader joining later does not see it.
-- `autofinish!`: done once the count reaches the total. `bar` and `iterate` turn it on; in a tree only `done!` finishes a task.
+- A counted task is done once its count reaches its total; pass `autofinish: false` when the total is only a guess. `done!` also finishes every task still open under it.
 - `transaction { }`: everything in the block lands as one batch, or nothing does.
 - `track_io(io, total:, step:) { |io| }`: reading the IO advances the task by bytes. This works for `read`, line reads, `readpartial` and so `IO.copy_stream`, and seeks back do not count twice. The task moves in steps of 0.1% of the total, not once per read. It needs the optional `progressive_io` gem, and an IO with a position. For a pipe or a socket, call `advance!(chunk.bytesize)` instead.
 
-A task reads 100% only once it and everything under it is done. Create a task's subtasks up front (or pass `expect:`) so its bar never jumps back when a new one opens.
+A task reads 100% only once it and everything under it is done, each by a `done!` of its own: children that are all through do not finish their parent. `run`, `cli`, `iterate` and a mount do this for you. Create a task's subtasks up front (or pass `expect:`) so its bar never jumps back when a new one opens.
 
 ## Another process, another Ractor
 
@@ -87,6 +96,14 @@ The browser client ships with the gem, in `js/` (`TaskProgress.js_path`): `task_
 
 ```ruby
 use Assiette::Server, root: "public", additional_directory_mappings: {"/task_progress" => TaskProgress.js_path}
+```
+
+```js
+import { followEventSourceAt, followBatches, applyBatchTo, TaskTree } from "/task_progress/task_tree.js"
+
+followEventSourceAt("/jobs/42/events", (tree, changes) => draw(tree))  // an SSE stream, drawn once a frame
+const feed = followBatches((tree) => draw(tree))                       // batches from anywhere: feed.push(batch)
+applyBatchTo(batch, tree)                                              // one batch, folded in place
 ```
 
 The terminal demo is `ruby -Ilib examples/cli_demo.rb`.

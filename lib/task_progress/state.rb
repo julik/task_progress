@@ -133,11 +133,15 @@ class TaskProgress
     # The state as a list of puts, one per node, in pre-order - or just the subtree at `path`
     def squash(path = []) = each(path).map { |path, node| Event.new(path:, op: :put, value: node.to_h) }
 
+    # Done, and everything under it ended - each task by a `done` or a `fail` of its own.
+    # Children that are all through do not finish their parent, which may have more to do after
+    # them; a failed one does not hold back a parent that went on to finish regardless
     def complete?(path = [], node = @nodes[path])
-      return false unless node
-      return true if node.status == :done
-      return false if node.children.empty? || missing(node).positive?
-      node.children.all? { complete?([*path, it], @nodes[[*path, it]]) }
+      return false unless node&.status == :done
+      node.children.all? do |id|
+        child = @nodes[[*path, id]]
+        child.status == :failed || complete?([*path, id], child)
+      end
     end
 
     # 0.0..1.0, unrounded. Children decide a parent's progress, by weight, and children it was

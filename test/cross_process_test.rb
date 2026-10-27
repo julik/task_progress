@@ -25,7 +25,8 @@ class CrossProcessTest < Minitest::Test
     assert_equal :done, mount.task.status
     assert_equal [["Unpack", :done, 3], ["Embed", :done, 0]], mount.task.subtasks.map { [it.name, it.status, it.count] }
     assert_equal "half", mount.task.subtasks.last.message
-    assert local.done?
+    assert mount.task.done?, "the child finished its root, so the mount is done"
+    refute local.done?, "local itself was never finished"
   end
 
   def test_a_child_failure_crosses_with_its_error
@@ -59,11 +60,17 @@ class CrossProcessTest < Minitest::Test
     assert_match(/exited with 9/, mount.task.error[:message])
   end
 
-  def test_a_child_that_exits_without_finishing_fails_the_mount
+  def test_a_child_that_dies_without_finishing_fails_the_mount
     mount = TaskProgress.new("local").mount("Engine")
-    spawn_child(mount, 'TaskProgress.cli("child").subtask("Left hanging")')
+    spawn_child(mount, 'TaskProgress.cli("child").subtask("Left hanging"); exit!(0)') # exit! skips at_exit
     assert_equal :failed, mount.task.status
     assert_match(/without finishing/, mount.task.error[:message])
+  end
+
+  def test_a_child_that_never_finished_its_root_is_finished_at_exit
+    mount = TaskProgress.new("local").mount("Engine")
+    spawn_child(mount, 'TaskProgress.cli("child").subtask("Left open")')
+    assert_equal [:done, :done], [mount.task.status, mount.task.subtasks.first.status]
   end
 
   def test_interrupting_the_parent_terminates_the_child
