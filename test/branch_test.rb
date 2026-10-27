@@ -38,7 +38,7 @@ class BranchTest < Minitest::Test
 
     assert batches.first.reset?
     batches.each_cons(2) { |a, b| assert_equal a.seq, b.prev }
-    assert_equal ["#{root.log.id}/#{upload.path.last}"], batches.map(&:log).uniq
+    assert_equal ["#{root.log.id}-#{upload.path.last}"], batches.map(&:log).uniq
   end
 
   def test_a_branch_squashes_the_same_as_it_streams

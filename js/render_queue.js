@@ -7,7 +7,7 @@
 // goes into `events`, in order: done, fail (with the error) and cancel, say lines (the tree never holds
 // them), and the stream starting over (reset) or breaking off (gap).
 
-const key = (path) => path.join("/")
+import { pathKey as key } from "./paths.js"
 
 // requestAnimationFrame follows the display and pauses in a background tab; Node has neither
 export const nextFrame = globalThis.requestAnimationFrame

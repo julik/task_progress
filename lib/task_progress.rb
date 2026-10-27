@@ -162,10 +162,10 @@ class TaskProgress
   # Whether a reader may offer to call it off, and it has not ended yet
   def cancelable? = !!node.cancelable && !finished?
 
-  # The task at `path` under this one - an Array of ids, or the ids joined with "/" the way the
-  # browser client keys its rows - or nil
+  # The task at `path` under this one - an Array of ids, or the ids joined with a dash, the way
+  # the browser client keys its rows (`x3k0-00af`) - or nil
   def find(path)
-    path = path.split("/") if path.is_a?(String)
+    path = path.split("-") if path.is_a?(String)
     full = [*@path, *path]
     TaskProgress.handle(@log, full) if @log.snapshot.key?(full)
   end
@@ -362,7 +362,7 @@ class TaskProgress
   # A request that comes too late is moot, not an error: by the time it arrives the task may well
   # have finished, and its process exited
   def request_cancel(path, reason = nil)
-    path = path.split("/") if path.is_a?(String)
+    path = path.split("-") if path.is_a?(String)
     full = [*@path, *path].freeze
     outcome = @log.transaction do |tx|
       node = tx.state[full]

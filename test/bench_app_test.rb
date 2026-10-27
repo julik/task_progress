@@ -72,7 +72,7 @@ class BenchAppTest < Minitest::Test
     job = start("workers", speed: 0.5)
     root = @app.jobs.find { it.id == job["id"] }.root
     sleep 0.01 until (worker = root.subtasks.first)
-    key = worker.path.join("/")
+    key = worker.path.join("-")
 
     status, body, location = cancellation(job, key)
     assert_equal [201, "canceled", key], [status, body["state"], body["path"]]
@@ -84,8 +84,8 @@ class BenchAppTest < Minitest::Test
     assert_equal [200, body], [status, again], "asking again gives back the same cancellation"
 
     plain = root.subtasks.last
-    assert_equal 409, cancellation(job, plain.path.join("/")).first if !plain.cancelable? && !plain.finished?
-    assert_equal 422, cancellation(job, "Not/A Path").first
+    assert_equal 409, cancellation(job, plain.path.join("-")).first if !plain.cancelable? && !plain.finished?
+    assert_equal 422, cancellation(job, "Not-A Path").first
     cancellation(job, "")
     batches(job["events"])
     assert_equal :canceled, root.status
@@ -110,7 +110,7 @@ class BenchAppTest < Minitest::Test
     assert_equal [201, "moot"], [status, body["state"]], "the job finished first, which is no error"
 
     @app.instance_variable_get(:@jobs).delete(job["id"])
-    status, body, = cancellation(job, root.subtasks.first.path.join("/"))
+    status, body, = cancellation(job, root.subtasks.first.path.join("-"))
     assert_equal [201, "moot"], [status, body["state"]], "nor is a job that is gone"
   end
 

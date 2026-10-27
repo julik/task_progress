@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { followEventSourceAt, requestCancel } from "./task_tree.js"
+import { followEventSourceAt, requestCancel, pathKey } from "./task_tree.js"
 import { rowView, CANCEL_ICON } from "./row_view.js"
 
 // Draws the tree from a TaskProgress SSE stream. Point it somewhere with the url value:
@@ -26,14 +26,14 @@ export default class extends Controller {
     if (changes.structure) {
       const rows = new Map()
       for (const node of tree.each()) {
-        const k = node.path.join("/")
+        const k = pathKey(node.path)
         rows.set(k, this.rows.get(k) ?? this.#row())
       }
       this.rows = rows
       this.element.replaceChildren(...rows.values())
     }
     for (const node of tree.each()) {
-      const k = node.path.join("/")
+      const k = pathKey(node.path)
       // An active row reads the clock for its rate, ETA or elapsed time, so it moves without a batch for it
       if (changes.structure || changes.touched.has(k) || node.status === "active") this.#patch(this.rows.get(k), rowView(tree, node))
     }

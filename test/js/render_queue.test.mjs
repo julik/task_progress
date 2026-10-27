@@ -1,7 +1,7 @@
 // node --test examples/web/test/
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { TaskTree, applyBatchTo, followBatches } from "../../js/task_tree.js"
+import { TaskTree, applyBatchTo, followBatches, pathKey, pathFromKey } from "../../js/task_tree.js"
 import { RenderQueue } from "../../js/render_queue.js"
 
 const batch = (seq, ops, prev = seq - 1) => ({ log: "w", prev, seq, at: seq, ops })
@@ -106,4 +106,11 @@ test("followBatches folds what is pushed and draws once a frame", () => {
   assert.equal(following.push({ log: "w", prev: 40, seq: 41, at: 41, ops: [] }), "gap")
   pending()
   assert.deepEqual(frames, [[9, 11]])
+})
+
+test("a path's key joins its ids with a dash, and splits back", () => {
+  assert.equal(pathKey(["x3k0", "00af"]), "x3k0-00af")
+  assert.equal(pathKey([]), "")
+  assert.deepEqual(pathFromKey("x3k0-00af"), ["x3k0", "00af"])
+  assert.deepEqual(pathFromKey(""), [])
 })

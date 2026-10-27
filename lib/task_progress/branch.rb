@@ -13,7 +13,7 @@ class TaskProgress
   class Branch
     attr_reader :output, :path, :id
 
-    def self.id(log_id, path) = "#{log_id}/#{path.join(".")}"
+    def self.id(log_id, path) = [log_id, *path].join("-")
 
     def initialize(output, path, log_id, seq)
       @output = output

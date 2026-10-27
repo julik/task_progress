@@ -16,7 +16,7 @@ require_relative "../scenarios"
 #   POST /jobs?scenario=&speed=  starts one
 #   POST /jobs/:id/cancel        raises Interrupt in its thread - the bench's own "Cancel job"
 #   POST /jobs/:id/cancellations creates the cancellation of one task: JSON {path, token}, `path`
-#                                its ids joined with "/" and `token` the job's cancel_token. Asking
+#                                its ids joined with a dash and `token` the job's cancel_token. Asking
 #                                again for the same task gives back the same cancellation
 #   GET  /jobs/:id/cancellations/:id   one cancellation, and how it went
 #   GET  /jobs/:id/events        its tree as SSE; with ?drop_after=N the stream is cut after N
@@ -33,7 +33,7 @@ class BenchApp
   # child process has been asked and has not answered down the stream yet, or "moot" - the task
   # had already ended, or the process it ran in had gone, by the time the request arrived
   Cancellation = Struct.new(:id, :path, :state, :requested_at) do
-    def to_h = {id:, path: path.join("/"), state:, requested_at:}
+    def to_h = {id:, path: path.join("-"), state:, requested_at:}
   end
   STATES = {canceled: "canceled", forwarded: "requested", moot: "moot"}.freeze
 
@@ -79,7 +79,7 @@ class BenchApp
       json(describe(job))
     in ["POST", %r{\A/jobs/(\w+)/cancellations\z}]
       cancel(request, $1)
-    in ["GET", %r{\A/jobs/(\w+)/cancellations/([\w.]+)\z}]
+    in ["GET", %r{\A/jobs/(\w+)/cancellations/([\w-]+)\z}]
       job = find($1)
       cancellation = job&.cancellations&.[]($2) or return json({error: "no such cancellation"}, 404)
       json(settle(job, cancellation).to_h)
@@ -114,10 +114,10 @@ class BenchApp
   def cancel(request, job_id)
     params = request.media_type == "application/json" ? (JSON.parse(request.body.read) rescue {}) : request.params
     return json({error: "invalid or expired token"}, 403) unless params.is_a?(Hash) && @tokens.verify(params["token"]) == job_id
-    path = params["path"].to_s.split("/")
+    path = params["path"].to_s.split("-")
     return json({error: "malformed path"}, 422) unless path.length <= TaskProgress::Wire::MAX_DEPTH && path.all? { it.match?(TaskProgress::Wire::SEGMENT) }
 
-    id = path.empty? ? "root" : path.join(".")
+    id = path.empty? ? "root" : path.join("-")
     job = find(job_id) or return json(Cancellation.new(id, path, "moot", Time.now.to_f).to_h, 201)
     @lock.synchronize do
       if (existing = job.cancellations[id])

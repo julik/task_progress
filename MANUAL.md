@@ -80,7 +80,7 @@ Anything that starts work - a percent, a count, a note, finishing - starts the t
 
 `name`, `status` (`:pending`, `:active`, `:done`, `:failed`, `:canceled`), `percent`, `fraction` (unrounded, 0..1), `count`, `total`, `message`, `error`, `done?`, `failed?`, `canceled?`, `finished?`, `cancelable?`, `parent`, `root`, `subtasks`, `find(path)` and `node` (the whole record, frozen). Reads come from a frozen snapshot, so they are safe from any thread.
 
-`find` takes a path under this task, as an Array of ids or as the ids joined with `"/"` - the way the browser client keys its rows.
+`find` takes a path under this task, as an Array of ids or as the ids joined with a dash (`"x3k0-00af"`) - the way the browser client keys its rows.
 
 ### Transactions
 
@@ -358,8 +358,8 @@ A token is an HMAC-SHA256 over a log id and an expiry, checked in constant time.
 Treat a cancellation as a resource rather than a call. The bench does it like this:
 
 ```
-POST /jobs/:id/cancellations    {"path": "x3k0/00af", "token": "..."}
-  201  {"id": "x3k0.00af", "path": "x3k0/00af", "state": "canceled"}   Location: /jobs/:id/cancellations/x3k0.00af
+POST /jobs/:id/cancellations    {"path": "x3k0-00af", "token": "..."}
+  201  {"id": "x3k0-00af", "path": "x3k0-00af", "state": "canceled"}   Location: /jobs/:id/cancellations/x3k0-00af
   200  the same cancellation, when asked again
   403  no token, a mangled one, an expired one, or another job's
   409  the task is not cancelable
@@ -396,7 +396,7 @@ The Stimulus controller and the React component import `@hotwired/stimulus`, `re
 ### task_tree.js
 
 ```js
-import { followEventSourceAt, followBatches, applyBatchTo, requestCancel, TaskTree } from "/task_progress/task_tree.js"
+import { followEventSourceAt, followBatches, applyBatchTo, requestCancel, pathKey, TaskTree } from "/task_progress/task_tree.js"
 
 const following = followEventSourceAt("/jobs/42/progress", (tree, changes) => draw(tree))
 following.close()
@@ -406,6 +406,8 @@ feed.push(batch)                                            // => "applied", "du
 
 applyBatchTo(batch, tree)                                   // one batch, folded in place
 ```
+
+A path's key is its ids joined with a dash - `pathKey(["x3k0", "00af"])` is `"x3k0-00af"`, and `pathFromKey` splits it back. Ids never contain a dash, so it needs no escaping in a URL, a class name or a data attribute. The root's key is the empty string. As a DOM id, prefix it (`task-x3k0-00af`): an id that starts with a digit needs `CSS.escape` in a selector.
 
 `TaskTree` folds batches the same way the Ruby side does, and a test holds the two to the same percent for every node. `tree.apply(batch)` returns `"applied"`, `"duplicate"` for one it already has, or `"gap"` - the tree is then `stale` until a batch with `prev` 0 arrives. `followEventSourceAt` reconnects on a gap, and the server starts it over from a fresh squash; with `followBatches` that is yours to do.
 
@@ -418,7 +420,7 @@ A stream can carry thousands of batches a second. Every batch is still folded as
 | `changes` | |
 |---|---|
 | `batches` | How many were folded. |
-| `touched` | Keys (`path.join("/")`) of the nodes changed, and every one above them. |
+| `touched` | Keys (`pathKey(path)`) of the nodes changed, and every one above them. |
 | `events` | What a renderer must not miss even if a later batch in the same frame hides it, in order: `done`, `fail` (with the error), `cancel`, `say`, `reset`, `gap`. |
 | `structure` | Rows came, went or moved. |
 

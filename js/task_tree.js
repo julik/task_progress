@@ -7,8 +7,9 @@
 //   applyBatchTo(batch, tree)            folds one batch into a tree, in place
 
 import { RenderQueue } from "./render_queue.js"
+import { pathKey as key } from "./paths.js"
 
-const key = (path) => path.join("/")
+export { pathKey, pathFromKey } from "./paths.js"
 const parentKey = (path) => key(path.slice(0, -1))
 
 const blankNode = (path, at) => ({
@@ -158,7 +159,7 @@ export class TaskTree {
         if (!node) break
         const prefix = key(path)
         for (const k of [...this.nodes.keys()]) {
-          if (k !== prefix && (prefix === "" || k.startsWith(prefix + "/"))) this.nodes.delete(k)
+          if (k !== prefix && (prefix === "" || k.startsWith(prefix + "-"))) this.nodes.delete(k)
         }
         node.children = []
         break
@@ -209,7 +210,7 @@ export function followEventSourceAt(url, onChange, options = {}) {
 }
 
 // Asks the server to cancel a task, by creating a cancellation: posts JSON with the task's path
-// (its ids joined with "/") and the token the server issued for this tree. The server decides -
+// (its pathKey) and the token the server issued for this tree. The server decides -
 // a task is only ever ended by its own tree - so nothing changes here until the `cancel` comes
 // back down the stream. A request that comes too late is not an error: the server answers it as
 // "moot", and the row has already finished anyway
@@ -217,7 +218,7 @@ export function requestCancel(url, path, { token } = {}) {
   return fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: path.join("/"), token })
+    body: JSON.stringify({ path: key(path), token })
   })
 }
 

@@ -365,7 +365,7 @@ class TaskTest < Minitest::Test
     assert_equal :refused, root.request_cancel(plain.path)
     assert_equal :moot, root.request_cancel(finished.path)
     assert_equal :moot, root.request_cancel(["nope"])
-    assert_equal :canceled, root.request_cancel(open.path.join("/"), "Asked")
+    assert_equal :canceled, root.request_cancel(open.path.join("-"), "Asked")
     assert_equal :moot, root.request_cancel(open.path), "a second time is moot"
     assert_equal ["Asked", :pending], [open.message, plain.status]
   end
@@ -389,7 +389,7 @@ class TaskTest < Minitest::Test
     refute plain.cancelable?
     assert_equal true, root.log.squashed.events.find { it.path == rows.path }.value[:cancelable], "it goes on the wire"
     refute root.log.squashed.events.find { it.path == plain.path }.value.key?(:cancelable)
-    assert_equal rows, root.find(rows.path.join("/"))
+    assert_equal rows, root.find(rows.path.join("-"))
     assert_equal rows, root.find(rows.path)
     assert_nil root.find("nope")
     rows.cancel!

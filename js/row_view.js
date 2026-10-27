@@ -1,4 +1,5 @@
 import { humanBytes } from "./task_tree.js"
+import { pathKey } from "./paths.js"
 
 const GLYPHS = { done: "✓", failed: "✗", canceled: "⊘", pending: "·" }
 const FINISHED = new Set(["done", "failed", "canceled"])
@@ -21,7 +22,7 @@ export function rowView(tree, node) {
   const glyph = GLYPHS[node.status]
   const icon = glyph ? `<span>${glyph}</span>` : '<span class="spin"></span>'
   return {
-    key: node.path.join("/"), path: node.path, depth: node.path.length, name: node.name, status: node.status, stale: node.stale,
+    key: pathKey(node.path), path: node.path, depth: node.path.length, name: node.name, status: node.status, stale: node.stale,
     cancelable: !!node.cancelable && !FINISHED.has(node.status),
     percent, indeterminate, measure, icon,
     message: node.status === "failed" ? node.error?.message ?? "" : [pace(tree, node), node.message].filter(Boolean).join(" · ")
