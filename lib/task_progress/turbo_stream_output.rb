@@ -5,7 +5,7 @@ require "cgi/escape"
 
 class TaskProgress
   # Draws the whole tree as HTML on every batch, as a Turbo Stream that replaces it in the page by
-  # morphing, and hands that to `broadcast` - in Rails, Turbo::StreamsChannel, which reaches every
+  # morphing, and hands that to `to` - in Rails, Turbo::StreamsChannel, which reaches every
   # page subscribed with `turbo_stream_from`, whichever process the tree lives in. Put it behind a
   # BufferedOutput, as TaskProgress.broadcast does, and a spammy job is drawn a few times a second.
   #
@@ -24,7 +24,7 @@ class TaskProgress
     #
     #   interface _Store
     #     def read: (String key) -> untyped
-    #     def write: (String key, untyped value) -> void
+    #     def write: (String key, untyped value, **untyped) -> void
     #     def delete: (String key) -> void
     #   end
 
@@ -32,14 +32,14 @@ class TaskProgress
     attr_reader :key #: String
 
     # @rbs @renderer: _Renderer
-    # @rbs @broadcast: ^(String) -> void
+    # @rbs @to: ^(String) -> void
     # @rbs @store: _Store?
 
-    # Draws with `renderer`, and hands each frame - a `<turbo-stream>` element - to `broadcast`
-    #: (renderer: _Renderer, broadcast: ^(String) -> void, ?store: _Store?, ?key: String) -> void
-    def initialize(renderer:, broadcast:, store: nil, key: "task_progress/#{renderer.id}")
+    # Draws with `renderer`, and hands each frame - a `<turbo-stream>` element - to `to`
+    #: (renderer: _Renderer, to: ^(String) -> void, ?store: _Store?, ?key: String) -> void
+    def initialize(renderer:, to:, store: nil, key: "task_progress/#{renderer.id}")
       @renderer = renderer
-      @broadcast = broadcast
+      @to = to
       @store = store
       @key = key
     end
@@ -49,7 +49,7 @@ class TaskProgress
     def call(_batch, log)
       html = @renderer.render(log.snapshot)
       @store&.write(@key, html)
-      @broadcast.call(TurboStreamOutput.frame(@renderer.id, html))
+      @to.call(TurboStreamOutput.frame(@renderer.id, html))
     end
 
     # A Turbo Stream that replaces the element `target` with `html`, morphing it

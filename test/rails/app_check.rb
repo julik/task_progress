@@ -35,6 +35,11 @@ class Import
   def to_param = id.to_s
 end
 
+class HaltingJob < ActiveJob::Base
+  before_perform { throw :abort }
+  def perform(import) = import.note("never")
+end
+
 class ImportJob < ActiveJob::Base
   retry_on RuntimeError, wait: 0, attempts: 2
   cattr_accessor :failing, :seen
@@ -42,7 +47,7 @@ class ImportJob < ActiveJob::Base
   def perform(rows, import)
     self.class.seen = import
     import.subtask("Rows", total: rows) do |t|
-      rows.times { t.tick! }
+      rows.times { t.tick }
       raise "flaky" if self.class.failing && executions == 1
     end
   end
@@ -80,7 +85,7 @@ class ReportsController < ActionController::Base
     root = TaskProgress.new("Building the report", cancelable: true)
     work = Thread.new do
       Rails.application.executor.wrap do
-        root.run { |r| r.subtask("Rows", total: 3) { |rows| 3.times { rows.tick! && sleep(0.01) } } }
+        root.run { |r| r.subtask("Rows", total: 3) { |rows| 3.times { rows.tick && sleep(0.01) } } }
       end
     end
     TaskProgress::SSE.new(root).each { response.stream.write(it) }
@@ -128,7 +133,7 @@ class RailsAppCheck < Minitest::Test
     assert_includes before, '<div id="task_progress_import_7" class="tree"></div>', "an empty tree before the first frame"
 
     TaskProgress.broadcast(import, "Importing", interval: 0.01) do |root|
-      root.subtask("Rows", total: 3, cancelable: true) { |t| 3.times { t.tick! } }
+      root.subtask("Rows", total: 3, cancelable: true) { |t| 3.times { t.tick } }
     end
 
     stream = Turbo::StreamsChannel.send(:stream_name_from, [import, :task_progress])
@@ -145,7 +150,7 @@ class RailsAppCheck < Minitest::Test
     frames = Queue.new
     worker = Thread.new do
       TaskProgress.broadcast(import, "Importing", interval: 0.01, poll: 0.02,
-        broadcast: ->(html) { frames << html }) do |root|
+        to: ->(html) { frames << html }) do |root|
         root.subtask("Rows", cancelable: true) { |t| loop { t.note("tick") && sleep(0.01) } }
         :carried_on
       end
@@ -169,7 +174,7 @@ class RailsAppCheck < Minitest::Test
     refute_same import, ImportJob.seen, "it went through the queue, as a key"
     assert_equal import.key, ImportJob.seen.key
     tree = TaskProgress.fetch(import.key)
-    assert tree.done?, "done when perform returned"
+    assert tree.complete?, "done when perform returned"
     assert_equal [["Rows", 3]], tree.subtasks.map { [it.name, it.count] }
   end
 
@@ -178,7 +183,7 @@ class RailsAppCheck < Minitest::Test
     import = TaskProgress.handoff("Importing")
     perform_enqueued_jobs { ImportJob.perform_later(2, import) }
     tree = TaskProgress.fetch(import.key)
-    assert tree.done?
+    assert tree.complete?
     assert_equal 2, tree.node.attempt
     assert_equal [["Rows", :done]], tree.subtasks.map { [it.name, it.status] }
   end
@@ -210,6 +215,14 @@ class RailsAppCheck < Minitest::Test
       batch.events.each { state.apply(it, at: batch.at) }
     }
     assert state.complete?, "streamed to the end"
+  end
+
+  def test_a_job_that_never_runs_its_work_leaves_nothing_beating
+    import = TaskProgress.handoff("Halting")
+    perform_enqueued_jobs { HaltingJob.perform_later(import) }
+    tree = TaskProgress.fetch(import.key)
+    assert_equal [:failed, "The job stopped before it began its work"], [tree.status, tree.error[:message]]
+    assert_nil TaskProgress.stream.get(TaskProgress::StreamOutput.beat_key(import.key)), "and not beating"
   end
 
   def test_a_task_from_this_process_alone_cannot_go_to_a_job

@@ -61,7 +61,7 @@ class TaskProgress
     # when a restarted remote replaces its tree. Ids only have to differ between siblings, since
     # the path tells cousins apart, and a draw that hits a sibling is drawn again
     #: (path, Random) -> path
-    def new_child(path, random)
+    def new_child(path, random) # :nodoc:
       @nodes.fetch(path)
       100.times do
         child = [*path, -random.rand(CHILD_IDS).to_s(36).rjust(4, "0")].freeze
@@ -95,7 +95,8 @@ class TaskProgress
       kids = node.children.map { [*path, it].freeze }
       return kids.each { rows(it, fold_over:, keep:, &block) } if kids.length <= fold_over
       done = kids.select { complete?(it) }
-      kept = done.max_by(keep) { @nodes.fetch(it).finished_at || 0.0 }
+      # The latest to finish, and of those that finished together - in one `done!` - the first
+      kept = done.each_with_index.max_by(keep) { |child, i| [@nodes.fetch(child).finished_at || 0.0, -i] }.map(&:first)
       pending = kids.select { @nodes.fetch(it).status == :pending }
       folded = Set.new(done - kept) | pending.drop(keep)
       yield [*path, "~done"].freeze, Fold.new(status: :done, count: done.length - kept.length) if done.length > kept.length
@@ -105,7 +106,7 @@ class TaskProgress
 
     # Folds one event in, or raises ArgumentError and leaves the state as it was
     #: (Event, at: Float, ?journal: Journal?) -> self
-    def apply(event, at:, journal: nil)
+    def apply(event, at:, journal: nil) # :nodoc:
       path, op, value = event.path, event.op, event.value
       node = @nodes[path]
       case op
@@ -253,11 +254,11 @@ class TaskProgress
 
     # A copy that can change without changing this one
     #: () -> State
-    def dup = State.new(@nodes.transform_values(&:deep_dup))
+    def dup = State.new(@nodes.transform_values(&:deep_dup)) # :nodoc:
 
     # Undoes what one transaction did
     #: (Journal) -> void
-    def rollback(journal) = journal.rollback(@nodes)
+    def rollback(journal) = journal.rollback(@nodes) # :nodoc:
 
     protected
 

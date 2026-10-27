@@ -6,20 +6,42 @@ class TaskProgress
   # key it keeps:
   #
   #     key            every batch, one entry each
+  #     key:run        the log id of the run that writes the tree now
   #     key:snapshot   the tree squashed into one batch, and the id of the entry it is as of -
   #                    where a reader starts, so the stream before it can be trimmed away
-  #     key:beat       there while the writer is alive, and gone a few seconds after it is not
+  #     key:beat       there while the run is alive, and gone a few seconds after it is not
   #     key:control    cancel requests, the other way - see Mount#follow_stream
   #
-  # A snapshot is taken at the first batch, every `snapshot_every` seconds after, and when the
-  # root finishes, and each one trims the stream back to the one before it. Once the root has
-  # finished, all of it expires `retain` seconds later.
+  # **One run at a time.** Each writer is a run, named by its log id, and claims `key:run` with its
+  # first batch. A run that a later one has taken over from - a job retried while the first
+  # attempt still limps on, two workers that adopted at once - may still append, and readers
+  # ignore what it appends; but every snapshot, trim, beat and expiry is written only while
+  # `key:run` still names the run that writes it, checked and written in one step. So a run that
+  # was replaced can never take the tree back.
   #
-  # With `beat`, every so many seconds it marks itself alive and takes the cancel requests that
-  # came, on a thread of its own - from the first batch until the root finishes or it is closed
+  # A snapshot is taken at the first batch, every `snapshot_every` seconds after, and when the
+  # root finishes, and each one trims the stream back to the one before it. Every key expires
+  # `retain` seconds after the last snapshot - a run that dies leaves nothing behind for good.
+  #
+  # With `heartbeat`, every so many seconds it marks itself alive and takes the cancel requests that
+  # came for it, on a thread of its own - from the first batch until the root finishes or it is
+  # closed. A request names the run it is for; a run also takes those for the run it took over
+  # from (`took_over`), so a cancel sent while a job still waited in the queue reaches whoever
+  # takes it up.
+  #
+  # A write that fails - Redis went away for a moment - is not lost: the next batch goes out as
+  # the whole tree, squashed, and readers start over from it
   class StreamOutput
     # The key it writes under
     attr_reader key: String
+
+    @log: Log?
+
+    @replaced: bool
+
+    @covered: Integer
+
+    @broken: bool
 
     @stop: Thread::Queue
 
@@ -31,11 +53,15 @@ class TaskProgress
 
     @state: State
 
+    @run: String?
+
+    @took_over: String?
+
     @retain: Integer | Float
 
     @snapshot_every: Integer | Float
 
-    @beat: (Integer | Float)?
+    @heartbeat: (Integer | Float)?
 
     @stream: untyped
 
@@ -51,22 +77,31 @@ class TaskProgress
     # : (String) -> String
     def self.control_key: (String) -> String
 
-    # A key for a new tree. The braces make it a Redis Cluster hash tag, so all four keys of a
+    # The key that names the run writing the tree now
+    # : (String) -> String
+    def self.run_key: (String) -> String
+
+    # A key for a new tree. The braces make it a Redis Cluster hash tag, so all five keys of a
     # tree land on the same node
     # : (String) -> String
     def self.key_for: (String) -> String
 
-    # Writes to `stream` under `key`
-    # : (untyped, String, ?beat: (Integer | Float)?, ?snapshot_every: Integer | Float, ?retain: Integer | Float) -> void
-    def initialize: (untyped, String, ?beat: (Integer | Float)?, ?snapshot_every: Integer | Float, ?retain: Integer | Float) -> void
+    # Writes to `stream` under `key`. `took_over` is the run it takes the tree over from
+    # : (untyped, String, ?heartbeat: (Integer | Float)?, ?snapshot_every: Integer | Float, ?retain: Integer | Float, ?took_over: String?) -> void
+    def initialize: (untyped, String, ?heartbeat: (Integer | Float)?, ?snapshot_every: Integer | Float, ?retain: Integer | Float, ?took_over: String?) -> void
 
     # Appends the batch, and takes a snapshot when one is due
     # : (Batch, Log) -> void
     def call: (Batch, Log) -> void
 
-    # Stops beating, and taking cancel requests - the work is over, one way or another
+    # Stops beating, and taking cancel requests - the work is over, one way or another. If the
+    # last write failed, the tree goes out whole once more, so readers do not stop short of the end
     # : () -> void
     def close: () -> void
+
+    # Whether a later run has taken the tree over, so this one writes no more
+    # : () -> bool
+    def replaced?: () -> bool
 
     private
 
@@ -76,10 +111,32 @@ class TaskProgress
     # : () -> void
     def stop: () -> void
 
-    # : (String, Batch) -> void
-    def snapshot: (String, Batch) -> void
+    # : (String) -> [String, String]
+    def guard: (String) -> [ String, String ]
+
+    # The run starts: from now on the tree is this run's to snapshot, trim and beat for
+    # : (String) -> String
+    def claim: (String) -> String
+
+    # The whole tree as one batch, in place of what failed to go out
+    # : (Log) -> Batch
+    def resync: (Log) -> Batch
+
+    # : (String, Batch, String) -> void
+    def snapshot: (String, Batch, String) -> void
+
+    # : (String) -> void
+    def finish: (String) -> void
+
+    # : () -> void
+    def replaced: () -> void
 
     # : (Log) -> void
     def beat: (Log) -> void
+
+    # A request names the run it was sent to - the one its sender saw writing the tree. Ones from
+    # before runs were named, and from a parent's control pipe, name none
+    # : (String, String) -> bool
+    def for_this_run?: (String, String) -> bool
   end
 end

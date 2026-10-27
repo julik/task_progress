@@ -28,7 +28,7 @@ class AutoloadTest < Minitest::Test
   def test_a_tree_in_memory_needs_neither_json_nor_openssl
     out = ruby(<<~RUBY)
       require "task_progress"
-      TaskProgress.new("x").subtask("y") { it.tick! }
+      TaskProgress.new("x").subtask("y") { it.tick }
       p [defined?(JSON), defined?(OpenSSL)]
     RUBY
     assert_equal "[nil, nil]\n", out
@@ -70,7 +70,7 @@ class AutoloadTest < Minitest::Test
     names = out.lines.grep(/ (ok|failed)$/).map { it.split.first.to_sym }
     expected = %i[VERSION Event OPS Batch State Node Journal Wire Log Transaction Branch Mount Squasher
       SummaryOutput NDJSONOutput PublishingOutput BufferedOutput RactorOutput TerminalOutput ExecutionLogOutput
-      SSE Refinements CancelToken TrackedIO RACTORS Canceled]
+      SSE CancelToken TrackedIO RACTORS Canceled]
     assert_empty expected - names, out
     refute_match(/failed/, out)
   end

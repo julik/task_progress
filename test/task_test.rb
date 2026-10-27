@@ -17,7 +17,7 @@ class TaskTest < Minitest::Test
     assert_empty root.subtasks
     assert_equal :pending, root.status
     assert_equal 0, root.percent
-    refute root.done?
+    refute root.complete?
   end
 
   def test_a_child_id_that_hits_a_sibling_is_drawn_again
@@ -39,41 +39,41 @@ class TaskTest < Minitest::Test
     assert_equal [a, b], root.subtasks
   end
 
-  def test_update_to_moves_the_percent_and_reports
-    root = TaskProgress.new("Task", &summary)
-    root.update_to(percent: 50, message: "Halfway done")
+  def test_update_moves_the_percent_and_reports
+    root = TaskProgress.new("Task", outputs: [TaskProgress::SummaryOutput.new(&summary)])
+    root.update(50, message: "Halfway done")
     assert_equal 50, root.percent
     assert_equal :active, root.status
     assert_equal [{percent: 50, message: "Halfway done"}], @calls
   end
 
-  def test_update_to_100_finishes_the_task
-    root = TaskProgress.new("Task", &summary)
-    root.update_to(percent: 100, message: "Custom message")
-    assert root.done?
+  def test_update_100_finishes_the_task
+    root = TaskProgress.new("Task", outputs: [TaskProgress::SummaryOutput.new(&summary)])
+    root.update(100, message: "Custom message")
+    assert root.complete?
     assert_equal :done, root.status
     assert_equal({percent: 100, message: "Task complete"}, @calls.last)
   end
 
   def test_percent_must_be_in_range
     task = TaskProgress.new("Task")
-    assert_raises(ArgumentError) { task.update_to(percent: 150) }
-    assert_raises(ArgumentError) { task.update_to(percent: -10) }
+    assert_raises(ArgumentError) { task.update(150) }
+    assert_raises(ArgumentError) { task.update(-10) }
     assert_equal :pending, task.status, "a refused update changes nothing"
   end
 
   def test_a_fractional_percent_is_kept
     task = TaskProgress.new("Task")
-    task.update_to(percent: 50.5)
+    task.update(50.5)
     assert_in_delta 0.505, task.fraction
     assert_equal 51, task.percent
   end
 
   def test_a_finished_task_refuses_updates_but_finishing_again_is_a_no_op
-    task = TaskProgress.new("Task", &summary)
+    task = TaskProgress.new("Task", outputs: [TaskProgress::SummaryOutput.new(&summary)])
     task.done!
-    assert_raises(ArgumentError) { task.update_to(percent: 50) }
-    assert_raises(ArgumentError) { task.advance! }
+    assert_raises(ArgumentError) { task.update(50) }
+    assert_raises(ArgumentError) { task.advance }
     assert_raises(ArgumentError) { task.note("late") }
     task.done!
     task.fail!("too late")
@@ -87,7 +87,7 @@ class TaskTest < Minitest::Test
     task.done!
     assert_equal :failed, task.status
     assert_equal "Task failed", task.error[:message]
-    assert_raises(ArgumentError) { task.update_to(percent: 50) }
+    assert_raises(ArgumentError) { task.update(50) }
   end
 
   def test_fail_carries_the_error_its_causes_and_extras
@@ -121,7 +121,7 @@ class TaskTest < Minitest::Test
     assert_equal [[grandchild.path, :done], [child.path, :done], [[], :done]], batches.last.events.map { [it.path, it.op] },
       "each with a done of its own, deepest first, in one batch"
     assert_equal [:done, :done, :done, :failed], [child, grandchild, finished, failed].map(&:status)
-    assert root.done?, "a failed child does not hold back a parent that finished regardless"
+    assert root.complete?, "a failed child does not hold back a parent that finished regardless"
     assert_equal 100, root.percent
   end
 
@@ -133,20 +133,20 @@ class TaskTest < Minitest::Test
     root.done!
     assert_equal :pending, mount.task.status
     assert_equal :pending, mount.task.subtasks.first.status
-    refute root.done?, "the remote is not through yet"
+    refute root.complete?, "the remote is not through yet"
     remote.done!
-    assert root.done?
+    assert root.complete?
   end
 
   def test_a_counted_task_finishes_at_its_total
     root = TaskProgress.new("Root")
     rows = root.subtask("Rows", total: 2)
-    2.times { rows.tick! }
-    assert rows.done?
-    rows.tick! # more work than the total said
+    2.times { rows.tick }
+    assert rows.complete?
+    rows.tick # more work than the total said
     assert_equal 2, rows.count
     guess = root.subtask("Guess", total: 2, autofinish: false)
-    3.times { guess.tick! }
+    3.times { guess.tick }
     refute guess.finished?
   end
 
@@ -154,16 +154,16 @@ class TaskTest < Minitest::Test
     root = TaskProgress.new("Root")
     a, b = root.subtask("A"), root.subtask("B")
     assert_equal 0, root.percent
-    a.update_to(percent: 50)
+    a.update(50)
     assert_equal 25, root.percent
-    b.update_to(percent: 100)
+    b.update(100)
     assert_equal 75, root.percent
     a.done!
     assert_equal 99, root.percent, "children all through do not finish their parent"
-    refute root.done?
+    refute root.complete?
     root.done!
     assert_equal 100, root.percent
-    assert root.done?
+    assert root.complete?
   end
 
   def test_weights
@@ -171,19 +171,19 @@ class TaskTest < Minitest::Test
     light, heavy = root.subtask("light"), root.subtask("heavy", weight: 3)
     heavy.done!
     assert_equal 75, root.percent
-    light.update_to(percent: 50)
+    light.update(50)
     assert_equal 88, root.percent
   end
 
   def test_expected_subtasks_hold_the_denominator
     root = TaskProgress.new("Root", expect: 2)
-    root.subtask("1").update_to(percent: 50)
+    root.subtask("1").update(50)
     assert_equal 25, root.percent
-    root.subtask("2").update_to(percent: 100)
+    root.subtask("2").update(100)
     assert_equal 75, root.percent
-    root.subtask("3").update_to(percent: 75)
+    root.subtask("3").update(75)
     assert_equal 75, root.percent, "past the expected count the denominator grows"
-    root.subtask("4").update_to(percent: 25)
+    root.subtask("4").update(25)
     assert_equal 63, root.percent
   end
 
@@ -191,24 +191,24 @@ class TaskTest < Minitest::Test
     root = TaskProgress.new("Root", expect: 2)
     root.subtask("only").done!
     assert_equal 50, root.percent
-    refute root.done?
+    refute root.complete?
   end
 
   def test_the_complex_tree_from_the_original_suite
-    root = TaskProgress.new("Fact Extraction", &summary)
+    root = TaskProgress.new("Fact Extraction", outputs: [TaskProgress::SummaryOutput.new(&summary)])
     email, llm, memory = root.subtask("Email Analysis"), root.subtask("LLM Processing"), root.subtask("Memory Saving")
     loading, parsing = email.subtask("Email Loading"), email.subtask("Email Parsing")
 
-    loading.update_to(percent: 25, message: "Loading emails...")
+    loading.update(25, message: "Loading emails...")
     assert_equal 4, root.percent
-    loading.update_to(percent: 100, message: "Emails loaded")
-    parsing.update_to(percent: 50, message: "Parsing emails...")
+    loading.update(100, message: "Emails loaded")
+    parsing.update(50, message: "Parsing emails...")
     assert_equal 25, root.percent
     parsing.done!
     assert_equal 33, root.percent
-    llm.update_to(percent: 75)
+    llm.update(75)
     assert_equal 58, root.percent
-    memory.update_to(percent: 50)
+    memory.update(50)
     assert_equal 75, root.percent
     llm.done!
     memory.done!
@@ -223,20 +223,20 @@ class TaskTest < Minitest::Test
     root = TaskProgress.new("R")
     root.subtask("A").done!
     b = root.subtask("B")
-    b.update_to(percent: 99)
+    b.update(99)
     assert_equal 99, root.percent, "(100 + 99) / 2 is 99.5, which must not read as done"
-    refute root.done?
+    refute root.complete?
   end
 
   def test_counted_tasks
     root = TaskProgress.new("R")
     rows = root.subtask("Rows", total: 4, autofinish: false) # the total is a guess
-    rows.tick!
-    rows.advance!(2, message: "three in")
+    rows.tick
+    rows.advance(2, message: "three in")
     assert_equal 75, rows.percent
     assert_equal 3, rows.count
     assert_equal "three in", rows.message
-    rows.advance!(5)
+    rows.advance(5)
     assert_equal 99, rows.percent, "a count past its total is still not done"
     rows.total = 20
     assert_equal 40, rows.percent
@@ -254,12 +254,12 @@ class TaskTest < Minitest::Test
     assert_equal 50, root.percent
     waiting.done!
     root.done!
-    assert root.done?
+    assert root.complete?
   end
 
   def test_the_block_form_finishes_or_fails_the_task
     root = TaskProgress.new("Root")
-    assert_equal :ok, root.subtask("Fine") { |t| t.update_to(percent: 50) && :ok }
+    assert_equal :ok, root.subtask("Fine") { |t| t.update(50) && :ok }
     assert_equal :done, root.subtasks.first.status
 
     assert_raises(RuntimeError) { root.subtask("Broken") { raise "Something went wrong" } }
@@ -293,12 +293,12 @@ class TaskTest < Minitest::Test
     assert_nil never.node.started_at, "calling off what never began does not begin it"
     assert_equal "Not needed after all", job.message
     assert job.finished?
-    refute job.done?
+    refute job.complete?
     job.cancel!
     job.done!
     assert_equal :canceled, job.status, "ending an ended task does nothing"
     root.done!
-    assert root.done?, "a canceled child does not hold back a parent that finished regardless"
+    assert root.complete?, "a canceled child does not hold back a parent that finished regardless"
   end
 
   def test_on_cancel_lets_blocked_work_be_unblocked
@@ -349,7 +349,7 @@ class TaskTest < Minitest::Test
   def test_a_raising_on_cancel_does_not_stop_the_others
     errors = []
     root = TaskProgress.new("Root")
-    root.log.on_output_error = ->(e, _) { errors << e.message }
+    root.log.on_error = ->(e, _) { errors << e.message }
     task = root.subtask("Task")
     called = []
     task.on_cancel { raise "oops" }
@@ -405,7 +405,7 @@ class TaskTest < Minitest::Test
       root.subtask("Rows", total: 1000) do |rows|
         1000.times {
           sleep 0.001
-          rows.tick! && reached += 1
+          rows.tick && reached += 1
         }
       end
       :carried_on
@@ -414,7 +414,7 @@ class TaskTest < Minitest::Test
     root.subtasks.first.cancel!
     assert_equal :carried_on, worker.value, "run takes its own task being called off as the end of its work"
     assert_operator reached, :<, 1000
-    assert_raises(TaskProgress::Canceled) { root.subtasks.first.tick! }
+    assert_raises(TaskProgress::Canceled) { root.subtasks.first.tick }
   end
 
   def test_failing_cancels_what_is_still_open_under_it
@@ -438,9 +438,9 @@ class TaskTest < Minitest::Test
 
   def test_messages_reach_the_tree_as_valid_utf8
     received = []
-    task = TaskProgress.new("root") { |percent:, message:| received << message }
-    task.update_to(percent: 10, message: "Reading Alice’s.xhtml".b)
-    task.update_to(percent: 20, message: "Broken \xE2 byte".b)
+    task = TaskProgress.new("root", outputs: [TaskProgress::SummaryOutput.new { |percent:, message:| received << message }])
+    task.update(10, message: "Reading Alice’s.xhtml".b)
+    task.update(20, message: "Broken \xE2 byte".b)
     assert_equal ["Reading Alice’s.xhtml", "Broken � byte"], received
   end
 
@@ -451,7 +451,7 @@ class TaskTest < Minitest::Test
     before = batches.length
     root.transaction do
       a.done!
-      b.update_to(percent: 50, message: "together")
+      b.update(50, message: "together")
       root.subtask("C")
     end
     assert_equal before + 1, batches.length
@@ -465,7 +465,7 @@ class TaskTest < Minitest::Test
     seq = root.log.seq
     assert_raises(RuntimeError) do
       root.transaction do
-        a.update_to(percent: 70)
+        a.update(70)
         root.subtask("Ghost")
         raise "no"
       end
@@ -482,8 +482,8 @@ class TaskTest < Minitest::Test
     b.done!
     assert_raises(ArgumentError) do
       root.transaction do
-        a.update_to(percent: 70)
-        b.update_to(percent: 10)
+        a.update(70)
+        b.update(10)
       end
     end
     assert_equal 0, a.percent
@@ -497,14 +497,14 @@ class TaskTest < Minitest::Test
     groups = workers.times.map { root.subtask("worker-#{it}", total: per_worker) }
     groups.each_with_index.map do |group, w|
       Thread.new do
-        per_worker.times { group.tick!(message: "w#{w} step #{it}") }
+        per_worker.times { group.tick(message: "w#{w} step #{it}") }
         group.done!
       end
     end.each(&:join)
 
     assert_equal 99, root.percent
     root.done!
-    assert root.done?
+    assert root.complete?
     assert_equal (1..root.log.seq).to_a, batches.map(&:seq)
     assert(batches.each_cons(2).all? { |a, b| b.prev == a.seq })
     notes = batches.flat_map(&:events).select { it.op == :note }.map(&:value)
@@ -514,7 +514,7 @@ class TaskTest < Minitest::Test
 
   def test_concurrent_block_failure_still_fails_its_task
     root = TaskProgress.new("Root")
-    busy = Thread.new { root.subtask("busy", total: 100) { |t| 100.times { t.tick! } } }
+    busy = Thread.new { root.subtask("busy", total: 100) { |t| 100.times { t.tick } } }
     assert_raises(RuntimeError) { root.subtask("boom") { raise "kaboom" } }
     busy.join
     assert_equal :failed, root.subtasks.find { it.name == "boom" }.status
@@ -523,25 +523,25 @@ class TaskTest < Minitest::Test
 
   def test_interleaved_fibers
     messages = []
-    root = TaskProgress.new("R") { |percent:, message:| messages << message if message }
+    root = TaskProgress.new("R", outputs: [TaskProgress::SummaryOutput.new { |percent:, message:| messages << message if message }])
     fibers = 3.times.map do |n|
       task = root.subtask("f#{n}")
       Fiber.new do
         3.times do |i|
-          task.update_to(percent: i * 30, message: "f#{n}.#{i}")
+          task.update(i * 30, message: "f#{n}.#{i}")
           Fiber.yield
         end
         task.done!
       end
     end
     fibers.each(&:resume) while fibers.any?(&:alive?)
-    assert(root.subtasks.all?(&:done?))
+    assert(root.subtasks.all?(&:complete?))
     assert_equal %w[f0.0 f1.0 f2.0], messages.first(3)
     assert_equal 12, messages.length
   end
 
   def test_null_is_silent
-    out, err = capture_io { TaskProgress.null.subtask("a") { it.update_to(percent: 50, message: "half") } }
+    out, err = capture_io { TaskProgress.null.subtask("a") { it.update(50, message: "half") } }
     assert_empty out
     assert_empty err
   end

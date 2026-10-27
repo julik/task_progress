@@ -6,16 +6,16 @@ class ConvenienceTest < Minitest::Test
   def test_a_bar_finishes_by_itself_at_its_total
     io = StringIO.new
     bar = TaskProgress.bar("Importing", total: 3, io:)
-    3.times { bar.tick! }
-    assert bar.done?
-    bar.tick! # a collection longer than its size said
+    3.times { bar.tick }
+    assert bar.complete?
+    bar.tick # a collection longer than its size said
     assert_equal 3, bar.count
     assert_equal ["Importing 1/3", "✓ Importing  0.0s"], io.string.lines.map { it.sub(/\A\[.*?\] /, "").chomp }
   end
 
   def test_a_bar_without_a_total_counts_and_spins
     bar = TaskProgress.bar("Streaming", quiet: true)
-    5.times { bar.tick! }
+    5.times { bar.tick }
     assert bar.node.indeterminate
     assert_equal 5, bar.count
     refute bar.finished?
@@ -24,7 +24,7 @@ class ConvenienceTest < Minitest::Test
   def test_a_bar_is_finished_when_the_program_ends
     script = <<~RUBY
       bar = TaskProgress.bar("Streaming", io: $stdout)
-      bar.tick!
+      bar.tick
     RUBY
     out = IO.popen([RbConfig.ruby, "-I", File.expand_path("../lib", __dir__), "-rtask_progress", "-e", script], &:read)
     assert_match(/✓ Streaming/, out.lines.last)
@@ -48,7 +48,7 @@ class ConvenienceTest < Minitest::Test
     enumerator = root.iterate(1..4, "Numbers")
     assert_equal :pending, root.subtasks.first.status, "nothing runs until it is consumed"
     assert_equal [2, 4, 6, 8], enumerator.map { it * 2 }
-    assert root.subtasks.first.done?
+    assert root.subtasks.first.complete?
   end
 
   def test_iterate_takes_the_size_and_never_counts
@@ -58,7 +58,7 @@ class ConvenienceTest < Minitest::Test
     stream = root.subtasks.first
     assert_nil stream.total
     assert_equal 3, stream.count
-    assert stream.done?
+    assert stream.complete?
 
     lazy = (1..Float::INFINITY).lazy.map { it * 2 }
     taken = root.iterate(lazy, "Lazy").first(3)
@@ -76,14 +76,9 @@ class ConvenienceTest < Minitest::Test
 
   def test_iterate_on_a_bare_bar_counts_on_the_bar_itself
     io = StringIO.new
-    result = TaskProgress.iterate([1, 2, 3, 4], "Rows", io:) { nil }
+    result = TaskProgress.bar("Rows", total: 4, io:).iterate([1, 2, 3, 4]) { nil }
     assert_equal [1, 2, 3, 4], result
     assert_match(/\A\[100% +[\d.]+s\] ✓ Rows  [\d.]+s\z/, io.string.lines.last.chomp)
-  end
-
-  def test_with_progress_is_there_for_files_that_ask_for_it
-    refute_respond_to [1], :with_progress
-    assert_equal [2, 4], RefinedLoop.double([1, 2])
   end
 
   def test_puts_says_a_line_that_the_tree_does_not_keep
@@ -127,9 +122,9 @@ class ConvenienceTest < Minitest::Test
     term = TaskProgress::TerminalOutput.new(io, interval: nil, clock: -> { now })
     root = TaskProgress.new("Import", outputs: [term], log: TaskProgress::Log.new(clock: -> { now }))
     rows = root.subtask("Rows", total: 100)
-    rows.tick!
+    rows.tick
     now += 10
-    rows.advance!(19)
+    rows.advance(19)
     assert_match(/Rows  █+░+ 20\/100  2\.0\/s  ETA 40\.0s  10\.0s/, term.lines(root.log.snapshot)[1])
   end
 
@@ -141,10 +136,4 @@ class ConvenienceTest < Minitest::Test
     child.subtask("Work").puts("Hello from the child")
     [child, batches]
   end
-end
-
-module RefinedLoop
-  using TaskProgress::Refinements
-
-  def self.double(items) = items.with_progress("Doubling", quiet: true).map { it * 2 }
 end

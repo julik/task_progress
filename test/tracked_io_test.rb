@@ -95,7 +95,7 @@ class TrackedIOTest < Minitest::Test
   def test_an_io_with_no_position_is_refused_with_advice
     reader, writer = IO.pipe
     error = assert_raises(ArgumentError) { @task.track_io(reader) }
-    assert_match(/advance!/, error.message)
+    assert_match(/advance/, error.message)
   ensure
     [reader, writer].each { it&.close }
   end

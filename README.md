@@ -29,9 +29,9 @@ Ruby 3.4 or newer. No runtime dependencies. Typed: RBS signatures ship in `sig/g
 
 ```ruby
 bar = TaskProgress.bar("Importing", total: rows.size)
-rows.each { import(it) && bar.tick! }
+rows.each { import(it) && bar.tick }
 
-TaskProgress.iterate(rows, "Importing") { |row| import(row) }  # or let it do the counting
+TaskProgress.bar("Importing", total: rows.size).iterate(rows) { |row| import(row) }  # or let it do the counting
 ```
 
 ```
@@ -48,7 +48,7 @@ TaskProgress.cli("Import") do |root|
   rows = root.subtask("Rows", total: rows.size, weight: 3, cancelable: true)
 
   download.run { copy(download.track_io(io)) }
-  rows.run { rows.each { import(it) && rows.tick! } }
+  rows.run { rows.each { import(it) && rows.tick } }
 end
 ```
 
@@ -62,7 +62,7 @@ In a Rails app with turbo-rails, a job draws its tree in every page that shows i
 class ImportJob < ApplicationJob
   def perform(import)
     TaskProgress.broadcast(import, "Importing") do |root|
-      root.subtask("Rows", total: rows.size, cancelable: true) { |t| rows.each { import_row(it) && t.tick! } }
+      root.subtask("Rows", total: rows.size, cancelable: true) { |t| rows.each { import_row(it) && t.tick } }
     end
   end
 end
@@ -72,7 +72,7 @@ end
 <%= task_progress_tree @import %>
 ```
 
-The job draws the whole tree as HTML a few times a second, and Action Cable takes it to every page, where Turbo morphs it in. Cancel buttons are plain forms. Nothing of Rails is needed for the rest of the gem: outside Rails, `broadcast:` says where frames go, and `TurboSSE` streams them to a `<turbo-stream-source>`.
+The job draws the whole tree as HTML a few times a second, and Action Cable takes it to every page, where Turbo morphs it in. Cancel buttons are plain forms. Nothing of Rails is needed for the rest of the gem: outside Rails, `to:` says where frames go, and `TurboSSE` streams them to a `<turbo-stream-source>`.
 
 ## In a web app
 
@@ -106,7 +106,7 @@ def perform(upload, import)                                # ...and arrives adop
   import.subtask("Rows", total: upload.rows) { |rows| ... }
 end
 
-TaskProgress::SSE.response(TaskProgress.follow(import.key), close: true)  # anywhere that reaches Redis
+TaskProgress::SSE.response(import.key)                     # a page's stream, anywhere that reaches Redis
 ```
 
 The page shows the job queued before a worker has it. A worker that dies goes stale, then fails; a retry starts the tree over as attempt 2. `task_progress watch KEY` draws it in a terminal.

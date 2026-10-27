@@ -8,7 +8,7 @@
 #
 #     TaskProgress.cli("Import") do |root|
 #       root.subtask("Download", unit: "bytes") { |t| t.track_io(io) ... }
-#       root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
+#       root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick } }
 #     end
 class TaskProgress
   # @rbs!
@@ -47,13 +47,12 @@ class TaskProgress
   autoload :TerminalOutput, "#{PARTS}/terminal_output"
   autoload :ExecutionLogOutput, "#{PARTS}/execution_log_output"
   autoload :SSE, "#{PARTS}/sse"
-  autoload :Refinements, "#{PARTS}/refinements"
   autoload :CancelToken, "#{PARTS}/cancel_token"
   autoload :TrackedIO, "#{PARTS}/tracked_io"
   autoload :HTMLRenderer, "#{PARTS}/html_renderer"
   autoload :TurboStreamOutput, "#{PARTS}/turbo_stream_output"
   autoload :TurboSSE, "#{PARTS}/turbo_sse"
-  autoload :MemoryStore, "#{PARTS}/memory_store"
+  autoload :MemoryCache, "#{PARTS}/memory_cache"
   autoload :CancellationsApp, "#{PARTS}/cancellations_app"
   autoload :RailsDefaults, "#{PARTS}/rails_defaults"
   autoload :MemoryStream, "#{PARTS}/memory_stream"
@@ -133,7 +132,7 @@ class TaskProgress
 
   # The output `cli` and `bar` pick for where the program runs, or nil when `quiet`
   #: (io: IO | StringIO, quiet: bool) -> output?
-  def self.cli_output(io:, quiet:)
+  def self.cli_output(io:, quiet:) # :nodoc:
     if (fd = ENV.delete("TASK_PROGRESS_FD"))
       # Not handed down to a process this one starts, which would hold the pipe open past our exit
       NDJSONOutput.new(IO.new(Integer(fd), "w", autoclose: false).tap { it.close_on_exec = true })
@@ -151,7 +150,7 @@ class TaskProgress
   # exit, finished or not
   #
   #     bar = TaskProgress.bar("Importing", total: rows.size)
-  #     rows.each { import(it) && bar.tick! }
+  #     rows.each { import(it) && bar.tick }
   #: (?String, ?total: Integer?, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
   def self.bar(name = File.basename($PROGRAM_NAME), total: nil, io: $stderr, quiet: false, **attributes)
     output = cli_output(io:, quiet:)
@@ -162,7 +161,7 @@ class TaskProgress
   # A root nobody runs a block for is finished when the program ends: done if it ends well,
   # failed with the error if it is going down with one
   #: (TaskProgress, output?) -> TaskProgress
-  def self.finish_at_exit(root, output)
+  def self.finish_at_exit(root, output) # :nodoc:
     at_exit do
       error = $!
       unless root.finished?
@@ -177,16 +176,8 @@ class TaskProgress
   # Outputs that hold a thread or a screen - TerminalOutput, ExecutionLogOutput, BufferedOutput -
   # can be closed, to draw their last and stop
   #: (output?) -> void
-  def self.close(output)
+  def self.close(output) # :nodoc:
     output.close if output.respond_to?(:close) # steep:ignore
-  end
-
-  # A bar over a collection, see `bar` and `iterate`
-  #
-  #     TaskProgress.iterate(rows, "Importing") { |row| import(row) }
-  #: (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
-  def self.iterate(collection, name = File.basename($PROGRAM_NAME), total: TaskProgress.size_of(collection), step: 1, **, &block)
-    bar(name, total:, **).iterate(collection, step:, &block)
   end
 
   # A root whose tree is drawn in pages with Turbo, from wherever it runs - a job, say. Every
@@ -201,21 +192,25 @@ class TaskProgress
   #
   # In Rails, the target is a record, and the rest comes from RailsDefaults: Turbo::StreamsChannel,
   # Rails.cache and the route the Railtie adds. Outside Rails the target is the element's id, and
-  # `broadcast:` - called with each frame - is up to you
-  #: (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) -> TaskProgress
-  #: [T] (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) { (TaskProgress) -> T } -> T?
-  def self.broadcast(target, name = File.basename($PROGRAM_NAME), broadcast: nil, store: nil, tokens: nil, cancel_url: nil, renderer: nil,
-    interval: 0.25, poll: 1, expires_in: 86_400, **attributes, &block)
+  # `to:` - called with each frame - is up to you
+  #: (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) -> TaskProgress
+  #: [T] (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) { (TaskProgress) -> T } -> T?
+  def self.broadcast(target, name = File.basename($PROGRAM_NAME), to: nil, store: nil, tokens: nil, cancel_url: nil, renderer: nil,
+    interval: 0.25, poll: 1, **attributes, &block)
     defaults = RailsDefaults.for(target)
-    send = broadcast || defaults[:broadcast] or raise ArgumentError, "Give it broadcast: - outside Rails with turbo-rails, there is nothing to send frames to"
+    send = to || defaults[:to] or raise ArgumentError, "Give it to: - outside Rails with turbo-rails, there is nothing to send frames to"
     store ||= defaults[:store]
     tokens ||= defaults[:tokens]
     cancel_url ||= defaults[:cancel_url]
     key = RailsDefaults.key(target)
-    renderer ||= HTMLRenderer.new(id: RailsDefaults.id(target), cancel_url: (cancel_url if tokens), cancel_token: tokens&.issue(key, expires_in:))
-    output = BufferedOutput.new(TurboStreamOutput.new(renderer:, broadcast: send, store:, key:), interval:)
-    root = new(name, outputs: [output], **attributes)
-    watch_cancellations(root, store, key, poll) if store && tokens
+    log = Log.new
+    # Tokens and requests are for this run alone: a page left open from the last run, or a click
+    # that came too late for it, cannot reach the next one for the same record
+    run = "#{key}/#{log.id}"
+    renderer ||= HTMLRenderer.new(id: RailsDefaults.id(target), cancel_url: (cancel_url if tokens), cancel_token: tokens&.issue(run, expires_in: 86_400))
+    output = BufferedOutput.new(TurboStreamOutput.new(renderer:, to: send, store:, key:), interval:)
+    root = new(name, outputs: [output], log:, **attributes)
+    watch_cancellations(root, store, run, poll) if store && tokens
     return finish_at_exit(root, output) unless block
     begin
       root.run { block.call(it) }
@@ -224,23 +219,29 @@ class TaskProgress
     end
   end
 
-  # Picks up the requests CancellationsApp leaves in the store, until the root has ended
+  # Picks up the requests CancellationsApp leaves in the store, until the root has ended. A store
+  # that fails for a moment is tried again at the next poll
   #: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
   def self.watch_cancellations(root, store, key, poll) # :nodoc:
     Thread.new do
-      Thread.current.report_on_exception = false
       until root.finished?
         sleep(poll)
-        root.log.snapshot.each do |path, node|
-          next unless node.cancelable && !node.finished?
-          request = CancellationsApp.request_key(key, path)
-          reason = store.read(request) or next
-          store.delete(request)
-          root.request_cancel(path, reason.to_s)
+        begin
+          root.log.snapshot.each do |path, node|
+            next unless node.cancelable && !node.finished?
+            request = CancellationsApp.request_key(key, path)
+            reason = store.read(request) or next
+            store.delete(request)
+            root.request_cancel(path, reason.to_s)
+          end
+        rescue => e
+          root.log.on_error.call(e, store)
         end
       end
     end
   end
+
+  private_class_method :cli_output, :finish_at_exit, :close
 
   @stream = nil #: untyped
   @stream_lock = Mutex.new #: Thread::Mutex
@@ -269,26 +270,27 @@ class TaskProgress
   # The tree lives in `stream` under `key`. Once it is handed off, leave it to the worker: what
   # this side writes after the worker has started is ignored
   #: (String, ?stream: untyped, **untyped) -> TaskProgress
-  def self.handoff(name, stream: self.stream, **attributes)
+  def self.handoff(name, stream: self.stream, retain: 86_400, **attributes)
     key = StreamOutput.key_for(Log.new.id)
-    new(name, outputs: [StreamOutput.new(stream, key)], log: Log.new(key:), **attributes)
+    new(name, outputs: [StreamOutput.new(stream, key, retain:)], log: Log.new(key:), **attributes)
   end
 
   # Takes up a tree handed off with `handoff` - by its key, or the task itself - as a root of
   # its own, with the name and attributes it was handed off with. It starts the tree over: a
   # second worker to adopt it, a job retried, replaces what the last one wrote.
   #
-  # Batches go out squashed, every `interval` seconds at most. Every `beat` seconds it tells
+  # Batches go out squashed, every `interval` seconds at most. Every `heartbeat` seconds it tells
   # whoever follows that it is alive, and takes the cancel requests that came. With a block,
   # the block is the root's work, see `run`, and it all stops when the block returns. Without
   # one, call `log.close` once the work is over - ActiveJob does this by itself, see JobSerializer
-  #: (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
-  #: [T] (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
-  def self.adopt(key, stream: self.stream, beat: 1, interval: 0.1, &block)
+  #: (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+  #: [T] (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  def self.adopt(key, stream: self.stream, heartbeat: 1, interval: 0.1, retain: 86_400, &block)
     key = key.key || raise(ArgumentError, "#{key.inspect} was not handed off") if key.is_a?(TaskProgress)
-    handed = StreamReader.new(stream, key).snapshot&.then { State.fold(it.events)[[]] }
-    handed or raise ArgumentError, "Nothing was handed off at #{key}, or it has expired"
-    writer = StreamOutput.new(stream, key, beat:)
+    snapshot = StreamReader.new(stream, key).snapshot
+    handed = snapshot && State.fold(snapshot.events)[[]]
+    raise KeyError.new("Nothing was handed off at #{key}, or it has expired", key:) unless snapshot && handed
+    writer = StreamOutput.new(stream, key, heartbeat:, retain:, took_over: snapshot.log)
     output = BufferedOutput.new(writer, interval:)
     log = Log.new(key:)
     log.on_close do
@@ -296,7 +298,10 @@ class TaskProgress
       writer.close
     end
     root = new(handed.name, outputs: [output], log:, total: handed.total, expect: handed.expect,
-      indeterminate: !!handed.indeterminate, unit: handed.unit, cancelable: !!handed.cancelable, attempt: handed.attempt.to_i + 1)
+      indeterminate: !!handed.indeterminate, unit: handed.unit, cancelable: !!handed.cancelable)
+    root.send(:meta, attempt: handed.attempt.to_i + 1)
+    # Called off before anyone took it up: it stays called off, and `run` will not start its work
+    root.cancel!(handed.message) if handed.status == :canceled
     return root unless block
     begin
       root.run { block.call(it) }
@@ -305,23 +310,48 @@ class TaskProgress
     end
   end
 
+  # Draws the tree handed off at `key` where a command-line program draws one (see `cli`) until it
+  # finishes, and returns it. Ctrl-C stops watching, and leaves the work alone. What
+  # `task_progress watch` does
+  #: (String, ?stream: untyped, ?io: IO | StringIO) -> TaskProgress
+  def self.watch(key, stream: self.stream, io: $stderr)
+    output = cli_output(io:, quiet: false)
+    follow(key, stream:) do |tree|
+      tree.add_output(output)
+      sleep(0.1) until tree.finished?
+      tree
+    rescue Interrupt
+      tree
+    ensure
+      close(output)
+    end
+  end
+
   # A tree that mirrors the one in `stream` at `key`, kept up to date on a thread of its own -
-  # for drawing it anywhere: a terminal, an SSE or polling endpoint, a parent's tree. Requests
-  # to cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and
-  # fails after `give_up_after` seconds of that, see Mount#follow_stream. Call `log.close` to stop
-  # following - SSE and Poll can do it for you when they are done
+  # for drawing it anywhere: a terminal, a parent's tree, an endpoint of your own. Requests to
+  # cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and fails
+  # after `give_up_after` seconds of that, see Mount#follow_stream. With a block, it follows for
+  # as long as the block runs; without one, `log.close` stops it. SSE and Poll take the key
+  # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError
   #: (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+  #: [T] (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
   def self.follow(key, stream: self.stream, poll: 1, give_up_after: 60)
-    root, mount = mirror(key)
+    root, mount = mirror(key, stream)
     mount.follow_stream(stream, key, poll:, give_up_after:)
-    root
+    return root unless block_given?
+    begin
+      yield root
+    ensure
+      root.log.close
+    end
   end
 
   # The tree in `stream` at `key` as it is now, read once - for a page, or one poll, that needs
-  # no more than that. See `follow` for one kept up to date
+  # no more than that. See `follow` for one kept up to date. A key nothing was handed off at -
+  # or whose tree has expired - is a KeyError, as with Hash#fetch
   #: (String, ?stream: untyped) -> TaskProgress
   def self.fetch(key, stream: self.stream)
-    root, mount = mirror(key)
+    root, mount = mirror(key, stream)
     mount.follow_stream(stream, key, watch: false)
     root
   end
@@ -349,8 +379,9 @@ class TaskProgress
   private_class_method :within
 
   # A root that is a mount and nothing else, named after `key` until the stream says otherwise
-  #: (String) -> [TaskProgress, Mount]
-  def self.mirror(key)
+  #: (String, untyped) -> [TaskProgress, Mount]
+  def self.mirror(key, stream)
+    StreamReader.new(stream, key).snapshot or raise KeyError.new("Nothing was handed off at #{key}, or it has expired", key:)
     log = Log.new(key:)
     root = new(key, log:)
     mount = Mount.new(log, [], own: false)
@@ -376,17 +407,14 @@ class TaskProgress
   #: (?String) -> TaskProgress
   def self.null(name = "progress") = new(name)
 
-  # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
-  # and `message:` as the tree changes. See `subtask` for `autofinish`. `attempt` says which
-  # run of the work this is - from 2 on, it is drawn with the task; `adopt` counts them
-  #: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool, ?attempt: Integer?) ?{ (percent: Integer, message: String?) -> void } -> void
-  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, attempt: nil, &summary)
+  # A new tree, and its root. See `subtask` for `autofinish`
+  #: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) -> void
+  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true)
     @log = log
     @path = ROOT
-    outputs = [*outputs, (SummaryOutput.new { |percent:, message:| summary.call(percent:, message:) } if summary)].compact
     outputs.each { @log.add_output(it) }
     @log.transaction do |tx|
-      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:, attempt:))
+      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:))
       tx.state[[]]&.autofinish = autofinish
     end
   end
@@ -430,6 +458,11 @@ class TaskProgress
     }.compact
   end
 
+  # Which run of the work this is, for a root taken up with `adopt`: 1, then 2 for a retry, and
+  # so on. Drawn with the task from 2 on. Nil for any other task
+  #: () -> Integer?
+  def attempt = node.attempt
+
   # The task as the tree holds it now - frozen, and safe to read from any thread
   #: () -> Node
   def node = @log.snapshot[@path] || raise(ArgumentError, "No task at #{@path.inspect} - it was pruned")
@@ -458,7 +491,7 @@ class TaskProgress
   #: () -> Hash[Symbol, untyped]?
   def error = node.error
 
-  # How many it has counted, see `advance!`
+  # How many it has counted, see `advance`
   #: () -> Integer
   def count = node.count
 
@@ -468,7 +501,7 @@ class TaskProgress
 
   # Done, and everything under it ended
   #: () -> bool
-  def done? = @log.snapshot.complete?(@path)
+  def complete? = @log.snapshot.complete?(@path)
 
   # Ended by `fail!`
   #: () -> bool
@@ -516,7 +549,7 @@ class TaskProgress
   #: (output) -> void
   def remove_output(output) = @log.remove_output(output)
 
-  # A child task. `total:` makes it counted (drive it with `advance!`), `indeterminate: true`
+  # A child task. `total:` makes it counted (drive it with `advance`), `indeterminate: true`
   # one with no measure of its own, and `weight:` how much of the parent it is. With a block
   # it runs the block as the child's work, see `run`, and returns the block's value.
   #
@@ -540,9 +573,12 @@ class TaskProgress
 
   # Runs the block as this task's work: done when it returns, failed with the error when it
   # raises - an Interrupt or a SignalException included - and the error raised on. A task
-  # canceled ends its work quietly: `run` returns nil
+  # canceled ends its work quietly: `run` returns nil. One canceled before it began does not
+  # begin
   #: [T] () { (TaskProgress) -> T } -> T?
   def run
+    # Called off before it began: there is no work to do
+    return nil if canceled?
     result = yield self
     done!
     result
@@ -563,8 +599,8 @@ class TaskProgress
   end
 
   # Moves the percent; 100 finishes the task
-  #: (percent: Integer | Float, ?message: String?) -> self
-  def update_to(percent:, message: nil)
+  #: (Integer | Float, ?message: String?) -> self
+  def update(percent, message: nil)
     @log.transaction do |tx|
       writable!(tx)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
@@ -575,7 +611,7 @@ class TaskProgress
 
   # Adds to the count - finishing the task, if that reaches its total
   #: (?Integer, ?message: String?) -> self
-  def advance!(by = 1, message: nil)
+  def advance(by = 1, message: nil)
     @log.transaction do |tx|
       writable!(tx)
       node = tx.state[@path] or next
@@ -588,9 +624,9 @@ class TaskProgress
     self
   end
 
-  # Adds one to the count, see `advance!`
+  # Adds one to the count, see `advance`
   #: (?message: String?) -> self
-  def tick!(message: nil) = advance!(1, message:)
+  def tick(message: nil) = advance(1, message:)
 
   # Goes through a collection a step per item. Given a name it opens a subtask for it, and
   # otherwise counts on this task. The total comes from `size`, never `count` - so a lazy
@@ -609,19 +645,20 @@ class TaskProgress
       meta(total:, indeterminate: false) if total && self.total.nil?
     end
     # Advancing costs a transaction, so it goes in steps of a thousandth of the total - what a
-    # bar can show anyway - and a loop over cheap items is not held up by its own progress
-    every = total ? [total / 1000, 1].max * step : step
+    # bar can show anyway - and a loop over cheap items is not held up by its own progress. Each
+    # item counts `step`, so a step bigger than a thousandth advances every item
+    every = total ? [total / 1000, step].max : step
     enumerator = Enumerator.new do |yielder|
       pending = 0
       task.run do
         collection.each do |item|
           yielder << item
           next if (pending += step) < every
-          task.advance!(pending)
+          task.advance(pending)
           pending = 0
         end
       ensure
-        task.advance!(pending) if pending.positive? && !task.finished?
+        task.advance(pending) if pending.positive? && !task.finished?
       end
     end
     block ? enumerator.each(&block) : enumerator
@@ -669,12 +706,16 @@ class TaskProgress
     self
   end
 
-  # Fails the task with an exception, a message, or nothing. `extra` goes along with the
-  # error, booleans and integers only - a reader drops the rest
+  # Fails the task with an exception, a message, or nothing. `extra` goes along with the error:
+  # up to 8 of them, each true, false or an Integer, which is all a reader takes
   #
   # What is still open under it is canceled: it did not fail, it was cut short
   #: (?(Exception | String)?, **bool | Integer) -> self
   def fail!(error = nil, **extra)
+    kept = extra.length <= 8 && extra.each_value.all? { it == true || it == false || it.is_a?(Integer) }
+    unless kept
+      raise ArgumentError, "Up to 8 extras, each true, false or an Integer - nothing else survives the wire, so nothing else is kept here either"
+    end
     @log.transaction do |tx|
       next unless writable!(tx, finishing: true)
       error = Wire.error_to_h(error || "#{tx.state[@path]&.name} failed").merge(extra)
@@ -749,7 +790,7 @@ class TaskProgress
   # Takes one cancel request - a line as `accept_cancel_requests` reads them - and returns what
   # came of it, see `request_cancel`; nil for a line that is not a request
   #: (String) -> Symbol?
-  def take_cancel_request(line)
+  def take_cancel_request(line) # :nodoc:
     require "json"
     request = begin
       JSON.parse(line)
@@ -803,11 +844,11 @@ class TaskProgress
   # is the IO's size unless given; with neither, the task counts bytes with no measure. With a
   # block, the block runs with the wrapped IO as this task's work, see `run`. Needs the
   # progressive_io gem, and an IO that can tell its position - for a pipe or a socket, call
-  # `advance!` with each chunk instead
+  # `advance` with each chunk instead
   #: (untyped, ?total: Integer?, ?step: Integer?) -> TrackedIO
   #: [T] (untyped, ?total: Integer?, ?step: Integer?) { (TrackedIO) -> T } -> T?
   def track_io(io, total: nil, step: nil)
-    raise ArgumentError, "#{io.class} cannot tell its position, so reading it cannot be tracked - call advance! with each chunk instead" unless positioned?(io)
+    raise ArgumentError, "#{io.class} cannot tell its position, so reading it cannot be tracked - call advance with each chunk instead" unless positioned?(io)
     total ||= io.size if io.respond_to?(:size)
     meta(total:, unit: "bytes", indeterminate: total.nil?)
     tracked = TrackedIO.new(io, self, total:, step:)
@@ -833,7 +874,7 @@ class TaskProgress
 
   # "4.2s", "3m07s", "2h15m"
   #: (Integer | Float) -> String
-  def self.duration(seconds)
+  def self.duration(seconds) # :nodoc:
     if seconds < 60 then format("%.1fs", seconds)
     elsif seconds < 3600 then format("%dm%02ds", seconds / 60, seconds % 60)
     else format("%dh%02dm", seconds / 3600, seconds % 3600 / 60)
@@ -842,7 +883,7 @@ class TaskProgress
 
   # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
   #: (Integer | Float) -> String
-  def self.human_bytes(n)
+  def self.human_bytes(n) # :nodoc:
     n = n.to_i
     found = SCALE.find { |_, size| n >= size } or return "#{n} bytes"
     unit, size = found
@@ -856,7 +897,7 @@ class TaskProgress
   # otherwise blow up whatever an output writes to (a database column, a UTF-8 log line)
   #: (nil) -> nil
   #: (untyped) -> String
-  def self.utf8(message)
+  def self.utf8(message) # :nodoc:
     return if message.nil?
     message = message.to_s
     return message if message.encoding == Encoding::UTF_8 && message.valid_encoding?

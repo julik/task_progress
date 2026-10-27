@@ -29,7 +29,46 @@ class TaskProgress
     # Teaches ActiveJob to take trees as arguments, and runs every job that gets one as the tree's work
     def self.install
       ActiveJob::Serializers.add_serializers(self)
-      ActiveJob::Base.around_perform { |job, perform| TaskProgress.working_on(job.arguments) { perform.call } }
+      ActiveJob::Base.prepend(Performing)
+      ActiveJob::Base.around_perform do |job, perform|
+        TaskProgress.working_on(job.arguments) do
+          perform.call
+          # A `before_perform` that halts stops the chain inside this one: the work never ran
+          job.task_progress_halted!
+        end
+      end
+    end
+
+    # Arguments are taken up as they are deserialized, which is before `around_perform` - and a job
+    # can stop in between: an argument that cannot be found, a `before_perform` that halts. Every
+    # tree taken up for a job is seen to the end once the job is through, whatever became of it,
+    # so none of them is left beating for work that is not being done
+    module Performing
+      # A callback halted the job - ActiveSupport says so through this hook
+      def halted_callback_hook(*)
+        @task_progress_halted = true
+        super
+      end
+
+      # Fails the trees the job took up, if a callback halted it before its work
+      def task_progress_halted!
+        return unless @task_progress_halted
+        arguments.flat_map { it.is_a?(Hash) ? it.values : [it] }.grep(TaskProgress).each do |root|
+          root.fail!("The job stopped before it began its work") unless root.finished?
+        end
+      end
+
+      # Runs the job, and ends what it took up and did not end
+      def perform_now
+        (Thread.current[:task_progress_adopted] ||= []).push([])
+        super
+      ensure
+        adopted = Thread.current[:task_progress_adopted]&.pop || []
+        adopted.each do |root|
+          root.fail!($! || "The job stopped before it began its work") unless root.finished?
+          root.log.close
+        end
+      end
     end
 
     # Whether it is a TaskProgress
@@ -43,7 +82,9 @@ class TaskProgress
     end
 
     # The tree at the key, adopted
-    def deserialize(hash) = TaskProgress.adopt(hash.fetch("key"))
+    def deserialize(hash)
+      TaskProgress.adopt(hash.fetch("key")).tap { Thread.current[:task_progress_adopted]&.last&.push(it) }
+    end
 
     # What it serializes
     def klass = TaskProgress

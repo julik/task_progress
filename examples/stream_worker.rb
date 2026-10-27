@@ -11,8 +11,8 @@ key = ARGV.fetch(0)
 speed = ARGV.include?("--speed") ? Float(ARGV[ARGV.index("--speed") + 1]) : 1.0
 TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV.fetch("REDIS_URL", "redis://localhost:6379")).new_pool(size: 2))
 
-TaskProgress.adopt(key, beat: 0.25) do |root|
+TaskProgress.adopt(key, heartbeat: 0.25) do |root|
   root.note("worker pid #{Process.pid}")
   images = root.subtask("Thumbnails", total: 40, cancelable: true)
-  40.times { |i| images.tick!(message: "image-#{format("%02d", i + 1)}.jpg") && sleep(0.1 / speed) }
+  40.times { |i| images.tick(message: "image-#{format("%02d", i + 1)}.jpg") && sleep(0.1 / speed) }
 end

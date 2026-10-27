@@ -4,8 +4,7 @@
 //
 //   followEventSourceAt(url, onChange)   a TaskProgress::SSE stream, drawn at most once a frame
 //   followPollingAt(url, onChange)       a TaskProgress::Poll endpoint, for where SSE does not get through
-//   followBatches(onChange)              the same, for batches you get some other way
-//   applyBatchTo(batch, tree)            folds one batch into a tree, in place
+//   batchFeed(onChange)              the same, for batches you get some other way
 //   tree.graft(path, localTasks)         draws tasks running in this browser under a server task
 
 import { RenderQueue } from "./render_queue.js"
@@ -28,6 +27,17 @@ export const WIRE_VERSION = 1
 // waiting ones - as TaskProgress::State#rows does
 export const FOLD_OVER = 12
 export const FOLD_KEEP = 3
+
+const TIMES = ["opened_at", "started_at", "finished_at"]
+const shifted = (value, shift) => {
+  if (!shift) return value
+  const moved = { ...value }
+  for (const field of TIMES) if (moved[field] != null) moved[field] -= shift
+  return moved
+}
+
+// The least time between two long polls, in milliseconds
+const LONG_POLL_GAP = 250
 
 const FINISHED = new Set(["done", "failed", "canceled"])
 const ENDED_WITHOUT_DONE = new Set(["failed", "canceled"])
@@ -125,8 +135,10 @@ export class TaskTree {
       const squash = graft.local.squash()
       return this.#graftOps(graft, squash.ops, squash.at)
     }
-    const moved = ops.map(([path, op, value]) => [[...top, ...path], op, value])
-    for (const [path, op, value] of moved) this.#applyOp(path, op, value, at)
+    // Times here are on this browser's clock; the tree keeps the server's, so they move over
+    const shift = this.offset ?? 0
+    const moved = ops.map(([path, op, value]) => [[...top, ...path], op, op === "put" ? shifted(value, shift) : value])
+    for (const [path, op, value] of moved) this.#applyOp(path, op, value, at - shift)
     this.onLocalChange?.(moved)
   }
 
@@ -249,7 +261,7 @@ export class TaskTree {
       case "cancel": // calling off what never began does not begin it
         node.finished_at = at
         node.status = "canceled"
-        if (value) node.message = value
+        if (value != null) node.message = value // an empty reason too, as State does
         break
       case "prune": {
         if (!node) break
@@ -272,23 +284,24 @@ export class TaskTree {
   }
 }
 
-// Folds the batch into the tree, in place. Returns "applied", "duplicate" or "gap", see TaskTree#apply
-export function applyBatchTo(batch, tree) { return tree.apply(batch) }
+// Nothing more will come: the root has finished - or the tree is empty after a batch, its task
+// pruned away before anyone asked
+const ended = (tree) => tree.seq != null && (!tree.root || FINISHED.has(tree.root.status))
 
 // Folds batches pushed into it from anywhere - a WebSocket, ActionCable, a poller - and calls
 // onChange(tree, changes) at most once a frame with what they changed, see render_queue.js.
 // `push` returns what the tree made of the batch: on a "gap" it is for the caller to start
 // over, by fetching a fresh squash (a batch with prev 0)
-export function followBatches(onChange, { schedule, clock } = {}) {
+export function batchFeed(onChange, { schedule, clock } = {}) {
   const tree = new TaskTree(clock ? { clock } : {})
   const queue = new RenderQueue(tree, onChange, { schedule })
   return { tree, push: (batch) => queue.apply(batch), close: () => queue.close() }
 }
 
-// Follows a TaskProgress::SSE stream at `url`, see followBatches. On a gap it reconnects, and
+// Follows a TaskProgress::SSE stream at `url`, see batchFeed. On a gap it reconnects, and
 // the server starts it over from a fresh squash. It stops once the root has finished
 export function followEventSourceAt(url, onChange, options = {}) {
-  const following = followBatches(onChange, options)
+  const following = batchFeed(onChange, options)
   const { tree } = following
   let source
   const connect = () => {
@@ -298,21 +311,22 @@ export function followEventSourceAt(url, onChange, options = {}) {
         source.close()
         connect()
       }
-      if (tree.root && FINISHED.has(tree.root.status)) source.close()
+      if (ended(tree)) source.close()
     })
   }
   connect()
   return { tree, close: () => { source.close(); following.close() } }
 }
 
-// Polls a TaskProgress::Poll endpoint at `url`, see followBatches - for where an EventSource does
+// Polls a TaskProgress::Poll endpoint at `url`, see batchFeed - for where an EventSource does
 // not get through. Every answer is the whole tree, and its ETag goes back in If-None-Match, so a
-// tree that has not changed costs a 304. Polls every `interval` milliseconds; with `wait` (in
-// seconds) the server holds each poll until something changes, up to that long, and the next
-// one goes out at once - long polling. A poll that fails is tried again later and later, up to
+// tree that has not changed costs a 304. Polls every `poll` seconds; with `wait` (seconds too)
+// the server holds each poll until something changes, up to that long, and the next one goes
+// out at once - long polling. A poll that fails is tried again later and later, up to
 // half a minute apart. It stops once the root has finished
-export function followPollingAt(url, onChange, { interval = 1000, wait = 0, ...options } = {}) {
-  const following = followBatches(onChange, options)
+export function followPollingAt(url, onChange, { poll: every = 1, wait = 0, ...options } = {}) {
+  const interval = every * 1000
+  const following = batchFeed(onChange, options)
   const { tree } = following
   const target = wait ? `${url}${url.includes("?") ? "&" : "?"}wait=${wait}` : url
   let etag = null
@@ -336,8 +350,9 @@ export function followPollingAt(url, onChange, { interval = 1000, wait = 0, ...o
       if (stopped) return
       delay = Math.min(Math.max(delay, interval) * 2, 30000)
     }
-    if (stopped || (tree.root && FINISHED.has(tree.root.status))) return
-    timer = setTimeout(poll, wait && delay === interval ? 0 : delay)
+    if (stopped || ended(tree)) return
+    // Long polling goes straight back - but not faster than this, however busy the tree
+    timer = setTimeout(poll, wait && delay === interval ? LONG_POLL_GAP : delay)
   }
   poll()
   return {
@@ -354,8 +369,8 @@ export function followPollingAt(url, onChange, { interval = 1000, wait = 0, ...o
 // Asks the server to cancel a task, by creating a cancellation: posts JSON with the task's path
 // (its pathKey) and the token the server issued for this tree. The server decides -
 // a task is only ever ended by its own tree - so nothing changes here until the `cancel` comes
-// back down the stream. A request that comes too late is not an error: the server answers it as
-// "moot", and the row has already finished anyway
+// back down the stream. A request that comes too late is not an error: the server takes it all
+// the same, and the row has already finished anyway
 //
 // On a Rails page it sends the page's CSRF token along, so `protect_from_forgery` lets it through
 export function requestCancel(url, path, { token } = {}) {

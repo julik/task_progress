@@ -8,7 +8,11 @@ class TaskProgress
   # expire - so a tree handed off here behaves as one handed off through Redis, as long as the
   # job runs in the same process.
   #
-  # Ids are "n-0", like Redis's, and grow across all keys. Safe to share between threads
+  # Ids are "n-0", like Redis's, and grow across all keys. Safe to share between threads.
+  #
+  # `set`, `trim`, `delete` and `expire` take a `guard:` - a key and the value it must hold - and
+  # do nothing, returning false, unless it does. Checked and done in one step, which is what keeps
+  # a writer another has replaced from writing over it, see StreamOutput
   class MemoryStream
     # @rbs @entries: Hash[String, Array[[Integer, String]]]
     # @rbs @values: Hash[String, String]
@@ -63,34 +67,47 @@ class TaskProgress
     def get(key) = @lock.synchronize { expire_locked(key) || @values[key] }
 
     # Keeps `value` at `key`, for `expires_in` seconds if given
-    #: (String, String, ?expires_in: (Integer | Float)?) -> void
-    def set(key, value, expires_in: nil)
-      @lock.synchronize do
+    #: (String, String, ?expires_in: (Integer | Float)?, ?guard: [String, String]?) -> bool
+    def set(key, value, expires_in: nil, guard: nil)
+      guarded(guard) do
         @values[key] = value
         expires_in ? @expiries[key] = now + expires_in : @expiries.delete(key)
       end
     end
 
     # Forgets the streams and values at these keys
-    #: (*String) -> void
-    def delete(*keys)
-      @lock.synchronize { keys.each { forget(it) } }
+    #: (*String, ?guard: [String, String]?) -> bool
+    def delete(*keys, guard: nil)
+      guarded(guard) { keys.each { forget(it) } }
     end
 
     # Drops the entries before the id `before`
-    #: (String, before: String) -> void
-    def trim(key, before:)
+    #: (String, before: String, ?guard: [String, String]?) -> bool
+    def trim(key, before:, guard: nil)
       floor = before.to_i
-      @lock.synchronize { @entries[key]&.reject! { |id, _| id < floor } }
+      guarded(guard) { @entries[key]&.reject! { |id, _| id < floor } }
     end
 
     # Forgets what is at `key` - a stream or a value - `seconds` from now
-    #: (String, Integer | Float) -> void
-    def expire(key, seconds)
-      @lock.synchronize { @expiries[key] = now + seconds if @entries.key?(key) || @values.key?(key) }
+    #: (String, Integer | Float, ?guard: [String, String]?) -> bool
+    def expire(key, seconds, guard: nil)
+      guarded(guard) { @expiries[key] = now + seconds if @entries.key?(key) || @values.key?(key) }
     end
 
     private
+
+    # Runs the block under the lock if the guard holds, and says whether it did
+    #: ([String, String]?) { () -> void } -> bool
+    def guarded(guard)
+      @lock.synchronize do
+        if guard
+          expire_locked(guard[0])
+          next false unless @values[guard[0]] == guard[1]
+        end
+        yield
+        true
+      end
+    end
 
     #: () -> Float
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)

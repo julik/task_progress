@@ -37,7 +37,7 @@ module Transcoder
         when "speed" then speed = value.strip
         when "out_time_us"
           seconds = value.to_i / 1_000_000
-          task.advance!(seconds - task.count, message: ("#{speed} realtime" if speed)) if seconds > task.count
+          task.advance(seconds - task.count, message: ("#{speed} realtime" if speed)) if seconds > task.count
         end
       end
       raise Failed, said.value.lines.last(3).join.strip unless wait.value.success?
@@ -59,13 +59,13 @@ end
   ⠋ 720p  ██████████████░░░░░░ 14/20  0.5s  15.1x realtime
 ```
 
-The task counts seconds of video, so the bar comes for free - and after the first second, the rate and the time left too. It finishes by itself at its total. Canceled, ffmpeg is told to stop, and the next `advance!` raises `TaskProgress::Canceled`, which ends the work quietly. If ffmpeg fails, the task fails with what ffmpeg last said:
+The task counts seconds of video, so the bar comes for free - and after the first second, the rate and the time left too. It finishes by itself at its total. Canceled, ffmpeg is told to stop, and the next `advance` raises `TaskProgress::Canceled`, which ends the work quietly. If ffmpeg fails, the task fails with what ffmpeg last said:
 
 ```
 ✗ clip.mov › 720p: Error opening output /nonexistent/clip-720p.mp4: No such file or directory
 ```
 
-Anything else that prints its progress goes the same way: `rsync --info=progress2`, `curl --progress-bar`, `pg_restore --verbose`, a `docker build`. Read its lines, find the number, and `advance!` or `update_to(percent:)`.
+Anything else that prints its progress goes the same way: `rsync --info=progress2`, `curl --progress-bar`, `pg_restore --verbose`, a `docker build`. Read its lines, find the number, and `advance` or `update(percent)`.
 
 ## A video transcoded in a background job, polled from a Rails page
 
@@ -113,7 +113,7 @@ class VideosController < ApplicationController
 
   def progress
     video = Video.find(params[:id])
-    status, headers, body = TaskProgress::Poll.response(TaskProgress.fetch(video.progress_key), request.env)
+    status, headers, body = TaskProgress::Poll.response(video.progress_key, request.env)
     response.headers.merge!(headers)
     self.status = status
     self.response_body = body
@@ -177,13 +177,7 @@ application.register("task-tree", TaskTreeController)
 
 It polls every second (`poll-value`), draws once a frame at most, and stops once the video is through. Cancel buttons post to the cancel URL with the page's CSRF token.
 
-To have each poll wait for news instead - long polling - set `data-task-tree-wait-value="25"` in place of the poll value, and answer with a tree that follows the stream for as long as the request waits:
-
-```ruby
-TaskProgress::Poll.response(TaskProgress.follow(video.progress_key), request.env, close: true)
-```
-
-Every waiting poll holds a server thread, so size Puma for the pages you expect open at once.
+To have each poll wait for news instead - long polling - set `data-task-tree-wait-value="25"` in place of the poll value. The same `progress` action does it: asked to wait, `Poll` follows the stream for as long as the request waits. Every waiting poll holds a server thread, so size Puma for the pages you expect open at once.
 
 ## Videos transcoded in subprocesses, drawn in one terminal
 
@@ -281,7 +275,7 @@ end
 # app/models/report.rb
 def build!(progress:)
   queries = progress.subtask("Queries", total: sections.size)
-  sections.each { |section| section.query! && queries.tick! }
+  sections.each { |section| section.query! && queries.tick }
   progress.subtask("PDF", indeterminate: true) { render_pdf! }
 end
 ```
@@ -317,8 +311,8 @@ Or on a page that is not a React app, with no JSX and no build step:
 <link rel="stylesheet" href="/task_progress/js/task_tree.css">
 <div class="tree" id="report-progress"></div>
 <script type="module">
-  import { mountTaskTree } from "task_progress/react"
-  mountTaskTree(document.getElementById("report-progress")).followEventSourceAt("<%= build_report_path(@report) %>")
+  import { createTaskTreeRoot } from "task_progress/react"
+  createTaskTreeRoot(document.getElementById("report-progress")).render({ url: "<%= build_report_path(@report) %>" })
 </script>
 ```
 

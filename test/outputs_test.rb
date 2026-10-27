@@ -24,7 +24,7 @@ class OutputsTest < Minitest::Test
     lines = io.string.lines.map { it.sub(LINE, "").chomp }
     assert_equal ["demo › A: note 0", "demo › A: Said", "✓ demo › A  0.0s"], lines, "the first news at once, the rest held back"
 
-    10.times { b.tick! }
+    10.times { b.tick }
     sleep 0.45
     assert_equal "demo › B 10/50", io.string.lines.last.sub(LINE, "").chomp, "held news goes out when the interval is up"
     b.fail!("out of disk")
@@ -58,7 +58,7 @@ class OutputsTest < Minitest::Test
   def test_ndjson_writes_lines_a_mount_can_follow
     io = StringIO.new
     root = TaskProgress.new("demo", outputs: [TaskProgress::NDJSONOutput.new(io)])
-    root.subtask("A").update_to(percent: 10)
+    root.subtask("A").update(10)
     lines = io.string.lines
     assert_equal 3, lines.length
     assert(lines.all? { TaskProgress::Wire.parse(it) })
@@ -85,7 +85,7 @@ class OutputsTest < Minitest::Test
     buffered = TaskProgress::BufferedOutput.new(slow, interval: 0)
     root = TaskProgress.new("demo", outputs: [buffered])
     a = root.subtask("A")
-    10.times { a.update_to(percent: it * 5) }
+    10.times { a.update(it * 5) }
     11.times { gate << :go }
     buffered.close
     assert_operator received.length, :<, 12, "batches were merged"
@@ -104,7 +104,7 @@ class OutputsTest < Minitest::Test
         task = live.sample(random: rng)
         case rng.rand(5)
         when 0 then live << task.subtask("t")
-        when 1 then task.update_to(percent: rng.rand(99))
+        when 1 then task.update(rng.rand(99))
         when 2 then task.done!
         when 3 then root.log.append(TaskProgress::Event.new(path: task.path, op: :prune)) && live.select! { root.log.snapshot.key?(it.path) }
         when 4 then task.note("n")
@@ -141,7 +141,7 @@ class OutputsTest < Minitest::Test
     root = TaskProgress.new("Import", outputs: [term], log: ticking_log)
     rows = root.subtask("Rows", total: 200)
     root.subtask("Waiting", indeterminate: true).note("for the API")
-    rows.advance!(50, message: "row 50")
+    rows.advance(50, message: "row 50")
     frames = io.string.split(/\e\[\d+A\e\[J/)
     last = frames.last.lines.map(&:chomp)
     assert_match(/\A⠋ Import  █+░+  13%/, last[0])
@@ -160,7 +160,7 @@ class OutputsTest < Minitest::Test
     rescue
       nil
     end
-    root.subtask("Running").update_to(percent: 5)
+    root.subtask("Running").update(5)
     lines = term.lines(root.log.snapshot)
     assert_equal 4, lines.length
     refute(lines.any? { it.include?("Hidden") })
@@ -191,7 +191,7 @@ class OutputsTest < Minitest::Test
     term = TaskProgress::TerminalOutput.new(StringIO.new, interval: nil)
     root = TaskProgress.new("R")
     5.times { root.subtask("done #{it}").done! }
-    3.times { root.subtask("busy #{it}").update_to(percent: 10) }
+    3.times { root.subtask("busy #{it}").update(10) }
     lines = term.lines(root.log.snapshot, height: 5)
     assert_equal 4, lines.length
     assert_match(/R/, lines[0])
@@ -201,7 +201,7 @@ class OutputsTest < Minitest::Test
   def test_terminal_says_how_many_it_could_not_fit
     term = TaskProgress::TerminalOutput.new(StringIO.new, interval: nil)
     root = TaskProgress.new("R")
-    10.times { root.subtask("busy #{it}").update_to(percent: 10) }
+    10.times { root.subtask("busy #{it}").update(10) }
     lines = term.lines(root.log.snapshot, height: 5)
     assert_equal 4, lines.length
     assert_equal "  … 8 more", lines.last
@@ -217,13 +217,13 @@ class OutputsTest < Minitest::Test
   def test_terminal_leaves_the_last_frame_or_erases_it
     io = StringIO.new
     root = TaskProgress.new("R", outputs: [TaskProgress::TerminalOutput.new(io, interval: nil)])
-    root.subtask("A") { it.update_to(percent: 50) }
+    root.subtask("A") { it.update(50) }
     root.done!
     assert_match(/✓ R .*100%.*\n\z/, io.string)
 
     io = StringIO.new
     root = TaskProgress.new("R", outputs: [TaskProgress::TerminalOutput.new(io, interval: nil, erase: true)])
-    root.update_to(percent: 50)
+    root.update(50)
     root.done!
     assert io.string.end_with?("\e[1A\e[J")
   end
@@ -243,12 +243,12 @@ class OutputsTest < Minitest::Test
   def test_cli_picks_its_output
     tty = Class.new(StringIO) { def tty? = true }
     ci = ENV.delete("CI")
-    assert_kind_of TaskProgress::TerminalOutput, TaskProgress.cli_output(io: tty.new, quiet: false)
+    assert_kind_of TaskProgress::TerminalOutput, TaskProgress.send(:cli_output, io: tty.new, quiet: false)
     ENV["CI"] = "true"
-    assert_kind_of TaskProgress::ExecutionLogOutput, TaskProgress.cli_output(io: tty.new, quiet: false), "nobody watches a CI terminal redraw"
+    assert_kind_of TaskProgress::ExecutionLogOutput, TaskProgress.send(:cli_output, io: tty.new, quiet: false), "nobody watches a CI terminal redraw"
     ENV["CI"] = ci
-    assert_kind_of TaskProgress::ExecutionLogOutput, TaskProgress.cli_output(io: StringIO.new, quiet: false)
-    assert_nil TaskProgress.cli_output(io: StringIO.new, quiet: true)
+    assert_kind_of TaskProgress::ExecutionLogOutput, TaskProgress.send(:cli_output, io: StringIO.new, quiet: false)
+    assert_nil TaskProgress.send(:cli_output, io: StringIO.new, quiet: true)
   end
 
   def test_cli_with_a_block_runs_it_and_returns_its_value

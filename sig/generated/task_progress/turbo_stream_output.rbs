@@ -2,7 +2,7 @@
 
 class TaskProgress
   # Draws the whole tree as HTML on every batch, as a Turbo Stream that replaces it in the page by
-  # morphing, and hands that to `broadcast` - in Rails, Turbo::StreamsChannel, which reaches every
+  # morphing, and hands that to `to` - in Rails, Turbo::StreamsChannel, which reaches every
   # page subscribed with `turbo_stream_from`, whichever process the tree lives in. Put it behind a
   # BufferedOutput, as TaskProgress.broadcast does, and a spammy job is drawn a few times a second.
   #
@@ -22,7 +22,7 @@ class TaskProgress
     interface _Store
       def read: (String key) -> untyped
 
-      def write: (String key, untyped value) -> void
+      def write: (String key, untyped value, **untyped) -> void
 
       def delete: (String key) -> void
     end
@@ -32,13 +32,13 @@ class TaskProgress
 
     @renderer: _Renderer
 
-    @broadcast: ^(String) -> void
+    @to: ^(String) -> void
 
     @store: _Store?
 
-    # Draws with `renderer`, and hands each frame - a `<turbo-stream>` element - to `broadcast`
-    # : (renderer: _Renderer, broadcast: ^(String) -> void, ?store: _Store?, ?key: String) -> void
-    def initialize: (renderer: _Renderer, broadcast: ^(String) -> void, ?store: _Store?, ?key: String) -> void
+    # Draws with `renderer`, and hands each frame - a `<turbo-stream>` element - to `to`
+    # : (renderer: _Renderer, to: ^(String) -> void, ?store: _Store?, ?key: String) -> void
+    def initialize: (renderer: _Renderer, to: ^(String) -> void, ?store: _Store?, ?key: String) -> void
 
     # Draws the tree as it stands - the batch only says it changed
     # : (Batch, Log) -> void

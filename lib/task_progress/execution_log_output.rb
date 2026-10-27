@@ -70,7 +70,9 @@ class TaskProgress
           when :set, :add then @pending = [event.path, nil] unless @pending&.first == event.path
           end
         end
-        return close_locked(flush: false) if snapshot[[]]&.finished? # older news than the ending
+        # Older news than the ending. Judged by what came, never the snapshot, which can run ahead
+        # of delivery - and close before the batch that ends the root has been said
+        return close_locked(flush: false) if @ended.include?([])
         say_pending if @pending && @clock.call - @said_at >= @interval
         @thread ||= Thread.new { run }
         @wake.signal

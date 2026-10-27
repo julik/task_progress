@@ -4,7 +4,7 @@
 class TaskProgress
   # What a block given to Log#transaction adds its events through. Each one is applied to the
   # tree as it comes, and journaled, so the whole transaction can be undone if the block raises
-  class Transaction
+  class Transaction # :nodoc:
     # What it has added so far, in order
     attr_reader :events #: Array[Event]
     # What it changed, to undo it by

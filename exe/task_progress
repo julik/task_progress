@@ -10,7 +10,7 @@ parser = OptionParser.new do |o|
     Usage: task_progress watch KEY [--redis URL]
 
     Draws a tree handed off with TaskProgress.handoff - running anywhere that reaches the same
-    Redis - until it finishes. Exits 0 if it was done, 1 if not. Ctrl-C stops watching, and
+    Redis - until it finishes. Exits 0 if it was complete, 1 if not. Ctrl-C stops watching, and
     leaves the work alone.
 
   TEXT
@@ -25,17 +25,9 @@ rescue LoadError
   abort "task_progress watch needs the redis-client gem"
 end
 
-TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url:).new_pool(size: 2))
-abort "Nothing was handed off at #{key}, or it has expired" unless TaskProgress::StreamReader.new(TaskProgress.stream, key).snapshot
-tree = TaskProgress.follow(key)
-output = TaskProgress.cli_output(io: $stderr, quiet: false)
-tree.add_output(output)
+stream = TaskProgress::RedisStream.new(RedisClient.config(url:).new_pool(size: 2))
 begin
-  sleep 0.1 until tree.finished?
-rescue Interrupt
-  nil
-ensure
-  tree.log.close
-  TaskProgress.close(output)
+  exit(TaskProgress.watch(key, stream:).complete? ? 0 : 1)
+rescue KeyError => e
+  abort e.message
 end
-exit(tree.done? ? 0 : 1)

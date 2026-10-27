@@ -12,6 +12,7 @@ is nothing before it to be compatible with.
 - Mounts: subtrees fed from subprocesses (over a pipe, with cancels going the other way), Ractors (Ruby 4.0) and streams.
 - Canceling, from any thread or from outside, with signed cancel tokens and a cancellations resource.
 - Handing work off through a stream - in memory, or Redis - to a job or a worker anywhere: `handoff`, `adopt`, `follow`, `fetch`. Followers notice a worker that went away, and a retry starts the tree over as the next attempt.
+- One run writes a handed-off tree at a time: a run that was taken over from cannot take it back, cancel requests name the run they are for, and a write that fails is made good by the next.
 - ActiveJob: a tree is a job argument like any other, and the job's `perform` is its work.
 - Server-Sent Events, long polling, and a browser client with Stimulus and React on top - drawn once a frame, with tasks that run in the browser grafted under the server's.
 - Turbo: a tree drawn as HTML and morphed into every page that shows it, from wherever the job runs.

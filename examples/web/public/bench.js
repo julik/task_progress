@@ -1,6 +1,6 @@
 import { Application } from "@hotwired/stimulus"
 import TaskTreeController from "/task_progress/stimulus_controller.js"
-import { mountTaskTree } from "/task_progress/react_task_tree.js"
+import { createTaskTreeRoot } from "/task_progress/react_task_tree.js"
 import { TaskTree } from "/task_progress/task_tree.js"
 import { nextFrame } from "/task_progress/render_queue.js"
 import { LocalTasks } from "/task_progress/local_tasks.js"
@@ -15,7 +15,7 @@ Turbo.session.drive = false
 
 const application = Application.start()
 application.register("task-tree", TaskTreeController)
-const react = mountTaskTree(document.getElementById("react-tree"))
+const react = createTaskTreeRoot(document.getElementById("react-tree"))
 const $ = (id) => document.getElementById(id)
 
 let scenarios = []
@@ -62,7 +62,7 @@ function watch(job) {
   $("stimulus-tree").dataset.taskTreeWaitValue = $("poll").checked ? "10" : "0"
   $("stimulus-tree").dataset.taskTreeUrlValue = $("poll").checked ? job.poll : url
   reactProps = { cancelUrl: job.cancellations, cancelToken: job.cancel_token, grafts: [] }
-  react.followEventSourceAt(url, reactProps)
+  react.render({ url, ...reactProps })
   inspector.follow(url)
   // The Turbo pane has no client of its own: the server draws every frame, and the source
   // stops itself once the job is through
@@ -78,7 +78,7 @@ $("graft").addEventListener("click", () => {
   const work = new LocalTasks("Hash files in this browser", { cancelable: true, weight: 2 })
   application.getControllerForElementAndIdentifier($("stimulus-tree"), "task-tree").graft([], work)
   reactProps = { ...reactProps, grafts: [...reactProps.grafts, { path: [], local: work }] }
-  react.followEventSourceAt(streamUrl(current), reactProps)
+  react.render({ url: streamUrl(current), ...reactProps })
   hashFiles(work, [["photos.zip", 24], ["video.mp4", 40], ["notes.txt", 6]])
 })
 

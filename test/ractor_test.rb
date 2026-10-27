@@ -21,7 +21,7 @@ class RactorTest < Minitest::Test
         root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::RactorOutput.new(port)])
         begin
           root.run do
-            root.subtask("Crunch", total: 50) { |t| 50.times { t.tick! } }
+            root.subtask("Crunch", total: 50) { |t| 50.times { t.tick } }
             root.subtask("Fail") { raise "nope" }
           end
         rescue RuntimeError

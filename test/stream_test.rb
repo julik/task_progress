@@ -58,11 +58,11 @@ module StreamBehaviour
 
     result = TaskProgress.adopt(import.key, stream: @stream) do |root|
       assert_equal "Importing", root.name, "named as it was handed off"
-      root.subtask("Rows", total: 3) { |rows| 3.times { rows.tick! } }
+      root.subtask("Rows", total: 3) { |rows| 3.times { rows.tick } }
       :imported
     end
     assert_equal :imported, result
-    wait_for { viewer.done? }
+    wait_for { viewer.complete? }
     assert_equal ["Rows"], viewer.subtasks.map(&:name)
     assert_equal 100, viewer.percent
   end
@@ -73,7 +73,7 @@ module StreamBehaviour
     items = root.subtask("Items", total: 1000)
     writer = root.log.instance_variable_get(:@outputs).first.instance_variable_get(:@output)
     writer.instance_variable_set(:@snapshot_every, 0)
-    1000.times { items.tick! }
+    1000.times { items.tick }
     sleep 0.2
     assert_operator @stream.read(import.key).length, :<, 50, "trimmed behind the snapshots"
     late = TaskProgress.fetch(import.key, stream: @stream)
@@ -87,7 +87,7 @@ module StreamBehaviour
     viewer = following(import.key)
     started = Queue.new
     worker = Thread.new do
-      TaskProgress.adopt(import.key, stream: @stream, beat: 0.05) do |root|
+      TaskProgress.adopt(import.key, stream: @stream, heartbeat: 0.05) do |root|
         started << true
         loop { root.note("working") && sleep(0.01) }
       end
@@ -104,7 +104,7 @@ module StreamBehaviour
     import = TaskProgress.handoff("Importing", stream: @stream)
     started = Queue.new
     worker = Thread.new do
-      TaskProgress.adopt(import.key, stream: @stream, beat: 0.05) do |root|
+      TaskProgress.adopt(import.key, stream: @stream, heartbeat: 0.05) do |root|
         root.subtask("Rows", cancelable: true) do |rows|
           started << rows.path.join("-")
           loop { rows.note("working") && sleep(0.01) }
@@ -134,7 +134,7 @@ module StreamBehaviour
     viewer = following(import.key, give_up_after: 0.3)
     sleep 0.2
     refute viewer.node.stale, "nobody has taken it up yet - that is waiting, not silence"
-    root = TaskProgress.adopt(import.key, stream: @stream, beat: 0.05, interval: 0)
+    root = TaskProgress.adopt(import.key, stream: @stream, heartbeat: 0.05, interval: 0)
     root.subtask("Rows").note("half way")
     wait_for { viewer.status == :active }
     root.log.close # as good as kill -9: it stops beating, and says nothing more
@@ -146,7 +146,7 @@ module StreamBehaviour
       assert_equal 2, retried.node.attempt, "counted from what the last run left"
       retried.subtask("Rows").done!
     end
-    wait_for { viewer.done? }
+    wait_for { viewer.complete? }
     assert_equal [2, false], [viewer.node.attempt, !!viewer.node.stale]
     assert_equal [["Rows", :done]], viewer.subtasks.map { [it.name, it.status] }, "the first run is gone, not mixed in"
   end
@@ -160,8 +160,87 @@ module StreamBehaviour
     wait_for { viewer.failed? }
     assert_equal "boom", viewer.error[:message]
     TaskProgress.adopt(import.key, stream: @stream) { |root| root.subtask("Rows").done! }
-    wait_for { viewer.done? }
+    wait_for { viewer.complete? }
     assert_equal [["Rows", :done]], viewer.subtasks.map { [it.name, it.status] }
+  end
+
+  def test_a_run_that_was_taken_over_cannot_take_the_tree_back
+    import = TaskProgress.handoff("Importing", stream: @stream)
+    zombie = TaskProgress.adopt(import.key, stream: @stream, interval: 0)
+    wait_for { TaskProgress.fetch(import.key, stream: @stream).node.attempt == 1 }
+    retry_run = TaskProgress.adopt(import.key, stream: @stream, interval: 0)
+    retry_run.note("attempt 2 working")
+    wait_for { TaskProgress.fetch(import.key, stream: @stream).message == "attempt 2 working" }
+    zombie.note("zombie still writing")
+    zombie.log.instance_variable_get(:@outputs).first.instance_variable_get(:@output).instance_variable_set(:@snapshot_every, 0)
+    zombie.note("zombie snapshots")
+    zombie.done!
+    sleep 0.1
+    late = TaskProgress.fetch(import.key, stream: @stream)
+    assert_equal [2, "attempt 2 working", :active], [late.node.attempt, late.message, late.status], "the snapshot is still attempt 2's"
+    retry_run.done!
+    wait_for { TaskProgress.fetch(import.key, stream: @stream).complete? }
+  ensure
+    [zombie, retry_run].each { it&.log&.close }
+  end
+
+  def test_a_write_that_failed_is_made_good_by_the_next
+    flaky = Flaky.new(@stream)
+    import = TaskProgress.handoff("Importing", stream: @stream)
+    errors = []
+    root = TaskProgress.adopt(import.key, stream: flaky, interval: 0)
+    root.log.on_error = ->(error, _) { errors << error }
+    rows = root.subtask("Rows", total: 3)
+    wait_for { TaskProgress.fetch(import.key, stream: @stream).subtasks.any? }
+    flaky.fail_next = true
+    rows.tick
+    2.times { rows.tick }
+    root.done!
+    root.log.close
+    assert_equal 1, errors.length
+    tree = TaskProgress.fetch(import.key, stream: @stream)
+    assert_equal [:done, 3, false], [tree.status, tree.subtasks.first.count, !!tree.node.stale]
+  end
+
+  def test_a_cancel_before_anyone_took_the_tree_up_holds
+    import = TaskProgress.handoff("Importing", stream: @stream, cancelable: true)
+    import.cancel!("Changed my mind")
+    ran = false
+    TaskProgress.adopt(import.key, stream: @stream) { ran = true }
+    refute ran, "the work never began"
+    assert_equal [:canceled, "Changed my mind"], TaskProgress.fetch(import.key, stream: @stream).then { [it.status, it.message] }
+
+    queued = TaskProgress.handoff("Importing", stream: @stream, cancelable: true)
+    assert_equal :canceled, TaskProgress.fetch(queued.key, stream: @stream).request_cancel([], "From a page, while it waited")
+    TaskProgress.adopt(queued.key, stream: @stream, heartbeat: 0.02) { |root| sleep(0.2) && root.note("too late") }
+    assert TaskProgress.fetch(queued.key, stream: @stream).canceled?, "the worker took up the request sent before it came"
+  end
+
+  def test_a_cancel_reaches_the_run_after_a_retry
+    import = TaskProgress.handoff("Importing", stream: @stream, cancelable: true)
+    viewer = following(import.key)
+    assert_raises(RuntimeError) { TaskProgress.adopt(import.key, stream: @stream) { raise "flaky" } }
+    wait_for { viewer.failed? }
+    started = Queue.new
+    worker = Thread.new do
+      TaskProgress.adopt(import.key, stream: @stream, heartbeat: 0.02) { |root| started << true && loop { root.note("working") && sleep(0.01) } }
+    end
+    started.pop
+    wait_for { viewer.status == :active && viewer.node.attempt == 2 }
+    viewer.request_cancel([], "Not this one either")
+    assert_nil worker.value, "attempt 2 heard it"
+  end
+
+  def test_a_tree_read_late_keeps_its_times
+    import = TaskProgress.handoff("Job", stream: @stream)
+    root = TaskProgress.adopt(import.key, stream: @stream, interval: 0)
+    step = root.subtask("Step")
+    step.done!
+    finished = step.node.finished_at
+    sleep 0.3
+    assert_in_delta finished, TaskProgress.fetch(import.key, stream: @stream).subtasks.first.node.finished_at, 0.01
+  ensure
+    root&.log&.close
   end
 
   def test_a_live_tree_can_mount_one_handed_off
@@ -169,8 +248,8 @@ module StreamBehaviour
     part = TaskProgress.handoff("Part 1", stream: @stream)
     mount = parent.mount("Part 1").follow_stream(@stream, part.key, poll: 0.05)
     (@closing ||= []) << parent
-    TaskProgress.adopt(part.key, stream: @stream) { |root| root.subtask("Rows", total: 2) { |t| 2.times { t.tick! } } }
-    wait_for { mount.task.done? }
+    TaskProgress.adopt(part.key, stream: @stream) { |root| root.subtask("Rows", total: 2) { |t| 2.times { t.tick } } }
+    wait_for { mount.task.complete? }
     assert_equal ["Rows"], mount.task.subtasks.map(&:name)
   end
 
@@ -202,6 +281,22 @@ module StreamBehaviour
   end
 end
 
+# A stream whose next append fails, as Redis would for a moment
+class Flaky
+  attr_accessor :fail_next
+
+  def initialize(stream) = @stream = stream
+
+  def append(key, data)
+    raise IOError, "connection reset" if fail_next && !(self.fail_next = false)
+    @stream.append(key, data)
+  end
+
+  def method_missing(name, ...) = @stream.public_send(name, ...)
+
+  def respond_to_missing?(name, include_private = false) = @stream.respond_to?(name, include_private) || super
+end
+
 class MemoryStreamTest < Minitest::Test
   include StreamBehaviour
 
@@ -216,7 +311,8 @@ class MemoryStreamTest < Minitest::Test
   end
 
   def test_nothing_handed_off_cannot_be_adopted
-    assert_raises(ArgumentError) { TaskProgress.adopt("task_progress:{nothing}", stream: @stream) }
+    assert_raises(KeyError) { TaskProgress.adopt("task_progress:{nothing}", stream: @stream) }
+    assert_raises(KeyError) { TaskProgress.fetch("task_progress:{nothing}", stream: @stream) }
     assert_raises(ArgumentError) { TaskProgress.adopt(TaskProgress.new("local"), stream: @stream) }
   end
 end
@@ -262,7 +358,7 @@ class WatchCommandTest < Minitest::Test
     pid = Process.spawn({"CI" => "1"}, RbConfig.ruby, File.expand_path("../exe/task_progress", __dir__), "watch", import.key, "--redis", url, err: writer)
     writer.close
     sleep 0.3
-    TaskProgress.adopt(import.key, stream:) { |root| root.subtask("Rows", total: 2) { |t| 2.times { t.tick! } } }
+    TaskProgress.adopt(import.key, stream:) { |root| root.subtask("Rows", total: 2) { |t| 2.times { t.tick } } }
     _, status = Process.wait2(pid)
     printed = reader.read
     assert status.success?, printed

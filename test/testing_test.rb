@@ -7,7 +7,7 @@ class TestingTest < Minitest::Test
   def test_a_tree_outlines_as_plain_hashes
     root = TaskProgress.new("Import")
     rows = root.subtask("Rows", total: 10)
-    4.times { rows.tick! }
+    4.times { rows.tick }
     rows.fail!(RuntimeError.new("row 5"))
     root.done!
     assert_equal({name: "Import", status: :done, percent: 100, children: [
@@ -30,8 +30,8 @@ class TestingTest < Minitest::Test
     rows = root.subtask("Rows")
     rows.fail!("row 12 is broken")
     assert_task_failed rows, with: /row 12/
-    error = assert_raises(Minitest::Assertion) { assert_task_done root }
-    assert_includes error.message, "Expected 'Import' to be done, but it is active"
+    error = assert_raises(Minitest::Assertion) { assert_task_complete root }
+    assert_includes error.message, "Expected 'Import' to be complete, but it is active"
     assert_includes error.message, %(error: "RuntimeError: row 12 is broken"), "the tree comes with it"
     root.cancel!
     assert_task_canceled root

@@ -54,7 +54,7 @@ class TaskProgress
         begin
           @output.call(@squasher.squash(batches), log)
         rescue => e
-          warn("TaskProgress: #{@output.inspect} raised #{e.class}: #{e.message}")
+          log.on_error.call(e, @output)
         end
         sleep(@interval) unless @queue.closed?
       end

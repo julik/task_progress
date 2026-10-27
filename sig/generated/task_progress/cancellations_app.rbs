@@ -10,6 +10,9 @@ class TaskProgress
   # A Turbo form submission is answered with an empty Turbo Stream, which changes nothing on the
   # page - the frame that follows does. Anything else gets 202 and a little JSON
   class CancellationsApp
+    # How long a request waits for its run to take it up
+    REQUEST_TTL: Integer
+
     @store: TurboStreamOutput::_Store
 
     @tokens: CancelToken

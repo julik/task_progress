@@ -7,7 +7,11 @@ class TaskProgress
   # expire - so a tree handed off here behaves as one handed off through Redis, as long as the
   # job runs in the same process.
   #
-  # Ids are "n-0", like Redis's, and grow across all keys. Safe to share between threads
+  # Ids are "n-0", like Redis's, and grow across all keys. Safe to share between threads.
+  #
+  # `set`, `trim`, `delete` and `expire` take a `guard:` - a key and the value it must hold - and
+  # do nothing, returning false, unless it does. Checked and done in one step, which is what keeps
+  # a writer another has replaced from writing over it, see StreamOutput
   class MemoryStream
     @appended: Thread::ConditionVariable
 
@@ -39,22 +43,26 @@ class TaskProgress
     def get: (String) -> String?
 
     # Keeps `value` at `key`, for `expires_in` seconds if given
-    # : (String, String, ?expires_in: (Integer | Float)?) -> void
-    def set: (String, String, ?expires_in: (Integer | Float)?) -> void
+    # : (String, String, ?expires_in: (Integer | Float)?, ?guard: [String, String]?) -> bool
+    def set: (String, String, ?expires_in: (Integer | Float)?, ?guard: [ String, String ]?) -> bool
 
     # Forgets the streams and values at these keys
-    # : (*String) -> void
-    def delete: (*String) -> void
+    # : (*String, ?guard: [String, String]?) -> bool
+    def delete: (*String, ?guard: [ String, String ]?) -> bool
 
     # Drops the entries before the id `before`
-    # : (String, before: String) -> void
-    def trim: (String, before: String) -> void
+    # : (String, before: String, ?guard: [String, String]?) -> bool
+    def trim: (String, before: String, ?guard: [ String, String ]?) -> bool
 
     # Forgets what is at `key` - a stream or a value - `seconds` from now
-    # : (String, Integer | Float) -> void
-    def expire: (String, Integer | Float) -> void
+    # : (String, Integer | Float, ?guard: [String, String]?) -> bool
+    def expire: (String, Integer | Float, ?guard: [ String, String ]?) -> bool
 
     private
+
+    # Runs the block under the lock if the guard holds, and says whether it did
+    # : ([String, String]?) { () -> void } -> bool
+    def guarded: ([ String, String ]?) { () -> void } -> bool
 
     # : () -> Float
     def now: () -> Float

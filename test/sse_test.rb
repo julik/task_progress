@@ -12,10 +12,10 @@ class SSETest < Minitest::Test
   def test_streams_the_squash_then_live_batches_until_the_root_finishes
     root = TaskProgress.new("job")
     a = root.subtask("A")
-    a.update_to(percent: 30)
+    a.update(30)
     reader = Thread.new { read_frames(TaskProgress::SSE.new(root)) }
     sleep 0.02
-    a.update_to(percent: 60)
+    a.update(60)
     root.done!
     frames = reader.value
 
@@ -57,7 +57,7 @@ class SSETest < Minitest::Test
     sleep 0.02
     finisher = Thread.new { root.done! }
     begin
-      a.update_to(percent: 10)
+      a.update(10)
     rescue
       nil
     end

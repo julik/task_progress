@@ -14,7 +14,7 @@ class MountTest < Minitest::Test
     mount = local.mount("Engine", weight: 3)
     child, batches = remote
     a = child.subtask("A", total: 2)
-    a.tick!(message: "one")
+    a.tick(message: "one")
     batches.each { assert_equal :applied, mount << it }
 
     assert_equal local.subtasks.last.path, mount.path
@@ -31,9 +31,9 @@ class MountTest < Minitest::Test
     local = TaskProgress.new("local")
     mount = local.mount("Engine")
     child, batches = remote
-    child.subtask("A") { |a| a.subtask("A1", total: 3) { |a1| 3.times { a1.tick! } } }
+    child.subtask("A") { |a| a.subtask("A1", total: 3) { |a1| 3.times { a1.tick } } }
     b = child.subtask("B", weight: 2)
-    b.update_to(percent: 40, message: "forty")
+    b.update(40, message: "forty")
     batches.each { mount << it }
 
     mirrored = local.log.snapshot.each(mount.path).map { |path, node| [path.drop(mount.path.length), node.to_h.except(:name, :weight, :opened_at, :started_at, :finished_at)] }
@@ -56,12 +56,12 @@ class MountTest < Minitest::Test
     local = TaskProgress.new("local")
     mount = local.mount("Engine")
     assert_raises(ArgumentError) { mount.task.subtask("sneaky") }
-    assert_raises(ArgumentError) { mount.task.update_to(percent: 50) }
+    assert_raises(ArgumentError) { mount.task.update(50) }
     child, batches = remote
     child.subtask("A")
     batches.each { mount << it }
     assert_raises(ArgumentError) { mount.task.subtasks.first.done! }
-    mount.done!
+    mount.task.done!
     assert_equal :done, mount.task.status
   end
 
@@ -70,9 +70,9 @@ class MountTest < Minitest::Test
     mount = local.mount("Engine")
     child, batches = remote
     a = child.subtask("A")
-    a.update_to(percent: 10)
-    a.update_to(percent: 20)
-    a.update_to(percent: 30)
+    a.update(10)
+    a.update(20)
+    a.update(30)
 
     assert_equal :applied, mount << batches[0]
     assert_equal :gap, mount << batches[2]
@@ -102,7 +102,7 @@ class MountTest < Minitest::Test
     child = TaskProgress.new("child", log: TaskProgress::Log.new(clock: -> { remote_time }))
     a = child.subtask("A")
     remote_time = 1_010.0
-    a.update_to(percent: 5)
+    a.update(5)
     remote_time = 1_030.0 # A has run 20 seconds by the remote's clock
 
     local_time = 5_000.0
@@ -138,7 +138,7 @@ class MountTest < Minitest::Test
     local = TaskProgress.new("local")
     mount = local.mount("Engine")
     child, batches = remote
-    child.subtask("A").update_to(percent: 40)
+    child.subtask("A").update(40)
     batches.each { mount << it }
     seq = local.log.seq
     assert_equal :duplicate, mount << batches[1]
@@ -150,7 +150,7 @@ class MountTest < Minitest::Test
   def test_a_hash_straight_from_publish_applies_without_a_json_round_trip
     mount = TaskProgress.new("web").mount("Job")
     child = TaskProgress.new("job", outputs: [TaskProgress::PublishingOutput.new(Struct.new(:mount) { def publish(_, payload) = mount << payload }.new(mount))])
-    child.subtask("A") { it.update_to(percent: 50) }
+    child.subtask("A") { it.update(50) }
     assert_equal :done, mount.task.subtasks.first.status
   end
 
@@ -159,7 +159,7 @@ class MountTest < Minitest::Test
     stream = Struct.new(:mount) { def publish(_, payload) = mount << payload }.new(mount)
     buffered = TaskProgress::BufferedOutput.new(TaskProgress::PublishingOutput.new(stream), interval: 0.05)
     child = TaskProgress.new("job", outputs: [buffered])
-    child.subtask("A") { |a| 20.times { a.update_to(percent: it) } }
+    child.subtask("A") { |a| 20.times { a.update(it) } }
     child.done!
     buffered.close
     assert_equal :done, mount.task.status
@@ -174,7 +174,7 @@ class MountTest < Minitest::Test
     first_batches.each { mount << it }
 
     restarted, = remote
-    restarted.subtask("New").update_to(percent: 70)
+    restarted.subtask("New").update(70)
     mount << restarted.log.squashed
     assert_equal ["New"], mount.task.subtasks.map(&:name)
     assert_equal 70, mount.task.subtasks.first.percent
@@ -233,7 +233,7 @@ class MountTest < Minitest::Test
     middle_mount = middle.mount("Grandchild")
 
     grandchild, grand_batches = remote
-    grandchild.subtask("Leaf", total: 4).advance!(3)
+    grandchild.subtask("Leaf", total: 4).advance(3)
     grand_batches.each { middle_mount << it }
     middle_batches.each { top_mount << it }
 
@@ -248,9 +248,24 @@ class MountTest < Minitest::Test
   def test_a_mount_follows_ndjson_off_an_io
     io = StringIO.new
     child = TaskProgress.new("child", outputs: [TaskProgress::NDJSONOutput.new(io)])
-    child.subtask("A") { it.update_to(percent: 50) }
+    child.subtask("A") { it.update(50) }
     mount = TaskProgress.new("local").mount("Engine")
-    mount.follow(StringIO.new(io.string))
+    mount.read(StringIO.new(io.string))
     assert_equal :done, mount.task.subtasks.first.status
+  end
+
+  def test_a_cancel_and_a_reset_at_once_do_not_undo_each_other
+    local = TaskProgress.new("local")
+    mount = local.mount("Engine")
+    child, batches = remote
+    child.subtask("A")
+    batches.each { mount << it }
+    reset = child.log.squashed
+    local.log.transaction do
+      mount.task.cancel!("stop")
+      # The reset is judged in the same transaction, after the cancel - and finds the mount ended
+      assert_equal :rejected, mount << reset
+    end
+    assert_equal :canceled, mount.task.status
   end
 end

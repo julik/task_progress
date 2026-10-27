@@ -82,6 +82,14 @@ class BrowserTest < Minitest::Test
 
   def done?(pane) = rows(pane).first&.then { it[0] == "done" && it[2] == "100%" }
 
+  def test_the_stimulus_pane_picks_up_again_when_it_is_put_back
+    start("transaction", speed: "2")
+    # Out of the page and back, as a moved or data-turbo-permanent element is
+    page.execute("const el = document.getElementById('stimulus-tree'); const parent = el.parentNode; el.remove(); setTimeout(() => parent.appendChild(el), 50)")
+    wait_for(timeout: 30, message: "the pane stopped where it was taken out") { done?("#stimulus-tree") }
+    assert_empty @errors
+  end
+
   def test_both_renderers_draw_a_job_to_the_end_alike
     job = start("transaction", speed: "4")
     wait_for(message: "the job never finished in both panes") { done?("#stimulus-tree") && done?("#react-tree") }

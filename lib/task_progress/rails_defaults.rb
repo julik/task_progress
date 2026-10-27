@@ -6,7 +6,7 @@ class TaskProgress
   # nothing else is given: the record's dom_id, Turbo::StreamsChannel, Rails.cache, and tokens
   # signed with a key the app's secret_key_base derives. Without Rails, nothing - and the caller
   # says what to broadcast to. The record is streamed to as `[record, :task_progress]`
-  module RailsDefaults
+  module RailsDefaults # :nodoc:
     class << self
       # The id the tree's element has, for a record or a string
       #: (untyped) -> String
@@ -25,7 +25,7 @@ class TaskProgress
         return {} unless rails?
         defaults = {store: ::Rails.cache, tokens:, cancel_url: cancellations_path} # steep:ignore
         return defaults unless defined?(::Turbo::StreamsChannel)
-        defaults.merge(broadcast: ->(html) { ::Turbo::StreamsChannel.broadcast_stream_to(target, :task_progress, content: html) }) # steep:ignore
+        defaults.merge(to: ->(html) { ::Turbo::StreamsChannel.broadcast_stream_to(target, :task_progress, content: html) }) # steep:ignore
       end
 
       # Tokens for the cancel buttons, signed with a key derived from the app's secret

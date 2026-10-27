@@ -2,7 +2,7 @@
 # rbs_inline: enabled
 
 class TaskProgress
-  # :nodoc:
+  # The unit of commit, see below
   Batch = Data.define(
     :log, #: String?
     :prev, #: Integer

@@ -14,6 +14,8 @@ class TaskProgress
   # A Turbo form submission is answered with an empty Turbo Stream, which changes nothing on the
   # page - the frame that follows does. Anything else gets 202 and a little JSON
   class CancellationsApp
+    # How long a request waits for its run to take it up
+    REQUEST_TTL = 600 #: Integer
     # @rbs @store: TurboStreamOutput::_Store
     # @rbs @tokens: CancelToken
 
@@ -32,7 +34,8 @@ class TaskProgress
       key = @tokens.verify(params["token"]&.to_s) or return respond(403, {error: "invalid or expired token"})
       path = params["path"].to_s.split("-")
       return respond(422, {error: "malformed path"}) unless path.length <= Wire::MAX_DEPTH && path.all? { it.match?(Wire::SEGMENT) }
-      @store.write(CancellationsApp.request_key(key, path), "Canceled from the browser")
+      # A request nobody takes up - the run ended first - is forgotten after a while
+      @store.write(CancellationsApp.request_key(key, path), "Canceled from the browser", expires_in: REQUEST_TTL)
       return [200, {"content-type" => "text/vnd.turbo-stream.html"}, [""]] if env["HTTP_ACCEPT"].to_s.include?("turbo-stream")
       respond(202, {path: path.join("-"), state: "requested"})
     end

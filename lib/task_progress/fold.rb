@@ -2,7 +2,7 @@
 # rbs_inline: enabled
 
 class TaskProgress
-  # :nodoc:
+  # Siblings drawn as one row, see below
   Fold = Data.define(
     :status, #: Symbol
     :count #: Integer

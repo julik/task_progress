@@ -24,10 +24,9 @@ class TaskProgress
     attr_reader :log #: Log
     # The mount node
     attr_reader :path #: path
-    # The seq of the remote's last batch it applied
-    attr_reader :last_seq #: Integer?
 
     # @rbs @control: IO?
+    # @rbs @last_seq: Integer?
     # @rbs @control_lock: Thread::Mutex
     # @rbs @pid_lock: Thread::Mutex
     # @rbs @source: String?
@@ -42,6 +41,8 @@ class TaskProgress
     # @rbs @follower: Thread?
     # @rbs @stopping: bool
     # @rbs @silent: bool
+    # @rbs @gave_up: bool
+    # @rbs @generation: Integer
 
     # For the node at `path` - see TaskProgress#mount, which opens one. Unless `own`, the
     # remote's root names and weighs the mount node too - for a tree that is nothing but a mount,
@@ -57,6 +58,8 @@ class TaskProgress
       @follower = nil
       @stopping = false
       @silent = false
+      @gave_up = false
+      @generation = 0
       @control = nil
       @control_lock = Mutex.new
       @pid_lock = Mutex.new
@@ -79,47 +82,63 @@ class TaskProgress
     # Takes a Batch, its Hash form, or a line of NDJSON. Returns :applied, :gap, :rejected, or
     # :duplicate for one already applied - redelivery is ordinary after a reconnect or a replay.
     # Following a stream, a batch from a writer another has since replaced is :superseded
-    #: (Batch | Hash[untyped, untyped] | String) -> (:applied | :gap | :rejected | :duplicate | :superseded)
+    #: (Batch | Hash[untyped, untyped] | String) -> Symbol
     def <<(batch)
       batch = coerce(batch) or return :rejected
-      new_run = batch.reset? && !@source.nil? && batch.log != @source
-      # Ended here - what the remote sent on its way out changes nothing. But a new run starts over
-      return :rejected if finished? && !(@following && new_run)
-      last_seq = @last_seq
-      if batch.log == @source && !batch.reset? && last_seq && batch.seq <= last_seq
-        return :duplicate
-      elsif @following && !batch.reset? && batch.log != @source
-        return :superseded
-      elsif !batch.reset? && (batch.log != @source || batch.prev != @last_seq)
-        mark_stale
-        return :gap
-      end
-      # Known before the batch commits, so an output that sees the mount end can tell who ended it
-      @remote_ended ||= batch.events.any? { it.path.empty? && (ENDINGS.include?(it.op) || (it.op == :put && FINISHED.include?(it.value[:status]))) }
-      applied = @log.transaction do |tx|
-        # The remote's times are on its clock. Its batch says what that clock read when it
-        # committed, so the gap to ours moves them over - give or take the time in transit
-        offset = batch.at.positive? ? tx.at - batch.at : 0.0
-        events = translate(batch.events, offset) or next false
+      starting_over = false
+      # Judged and applied in one transaction: a cancel or another batch arriving at the same
+      # moment comes wholly before this one or wholly after it
+      # It happened when the remote committed it. A pipe or a port is fresh news, so its clock is
+      # moved onto ours by the gap between the two; a stream hands on what may have been written
+      # long ago, by a machine whose clock is taken to agree with ours
+      at = (@following && batch.at.positive?) ? batch.at : nil
+      outcome = @log.transaction(at:) do |tx|
+        node = tx.state[@path] or next :rejected
+        source = @source
+        last_seq = @last_seq
+        new_run = batch.reset? && !source.nil? && batch.log != source
+        # A run given up on as lost that turns out alive is taken back, from a fresh squash
+        starting_over = @following && batch.reset? && (new_run || @gave_up)
+        if node.finished? && !starting_over
+          # Ended here - what the remote sent on its way out changes nothing. A lost run that
+          # speaks again gets read afresh, see above
+          next (@following && @gave_up && batch.log == source) ? :gap : :rejected
+        end
+        if batch.log == source && last_seq && batch.seq <= last_seq && !starting_over
+          # Said again - after a reconnect, a replay, or a resync to a snapshot it has since passed
+          next :duplicate
+        elsif @following && !batch.reset? && batch.log != source
+          next :superseded
+        elsif !batch.reset? && (batch.log != source || batch.prev != last_seq)
+          mark_stale(tx)
+          next :gap
+        end
+        offset = (!@following && batch.at.positive?) ? tx.at - batch.at : 0.0
+        events = translate(batch.events, offset) or next :rejected
         events.unshift(Event.new(path: @path, op: :prune)) if batch.reset?
-        events.unshift(Event.new(path: @path, op: :put, value: fresh(tx.state))) if new_run
+        events.unshift(Event.new(path: @path, op: :put, value: fresh(tx.state))) if new_run || starting_over
         events.each { tx << it }
         tx << Event.new(path: @path, op: :meta, value: {stale: false}) if @stale
-        true
+        # Known before the batch is delivered, so an output that sees the mount end can tell who ended it
+        @remote_ended = false if starting_over
+        @remote_ended ||= batch.events.any? { it.path.empty? && (ENDINGS.include?(it.op) || (it.op == :put && FINISHED.include?(it.value[:status]))) }
+        @source = batch.log
+        @last_seq = batch.seq
+        @stale = false
+        @silent = false
+        @gave_up = false
+        :applied
       end
-      return :rejected unless applied
-      @source = batch.log
-      @last_seq = batch.seq
-      @stale = false
-      @silent = false
-      :applied
+      # The run before may have ended, and its cancel went with it
+      arm_cancel if outcome == :applied && starting_over
+      outcome
     rescue ArgumentError
       :rejected
     end
 
     # Reads NDJSON batches off an IO until EOF
     #: (IO) -> self
-    def follow(io)
+    def read(io)
       Wire.each_batch(io) { self << it }
       self
     end
@@ -145,7 +164,7 @@ class TaskProgress
       control_reader.close
       @controlled = true
       task.on_cancel { stop(pid, grace) unless @remote_ended }
-      follow(reader)
+      read(reader)
       status = reap(pid)
       fail!("#{File.basename(command.first.to_s)} exited with #{status.exitstatus || status.termsig}") if status && !status.success?
       fail!("#{File.basename(command.first.to_s)} exited without finishing") unless finished?
@@ -186,7 +205,7 @@ class TaskProgress
       @controlled = true
       @reader = StreamReader.new(stream, key)
       @forward = ->(line) { stream.append(StreamOutput.control_key(key), line) }
-      task.on_cancel { |reason| request_cancel([], reason) unless @remote_ended }
+      arm_cancel
       catch_up
       # Read once, a tree that is under way with nobody beating for it can only be a lost one
       mark_stale if !watch && @log.snapshot[@path]&.status == :active && !@reader&.alive?
@@ -202,7 +221,7 @@ class TaskProgress
     # Takes what the stream has for it - waiting up to `timeout` seconds when it has nothing yet -
     # and returns how many batches it applied. #follow_stream does this over and over
     #: (?timeout: (Integer | Float)?) -> Integer
-    def catch_up(timeout: nil)
+    def catch_up(timeout: nil) # :nodoc:
       reader = @reader or raise ArgumentError, "Not following a stream - see #follow_stream"
       reader.read(timeout:).count do |batch|
         outcome = self << batch
@@ -211,9 +230,9 @@ class TaskProgress
       end
     end
 
-    # Stops following, see #follow_stream
+    # Stops following, see #follow_stream - closing the log does it
     #: () -> void
-    def stop_following
+    def stop_following # :nodoc:
       @stopping = true
       @follower&.join unless @follower == Thread.current
     end
@@ -222,8 +241,9 @@ class TaskProgress
     # :forwarded, or :moot when there is no child to ask any more - it has exited, or this mount
     # was never spawned. Whether the child cancels anything shows up the stream, if it does
     #: (path, ?String?) -> (:forwarded | :moot)
-    def request_cancel(path, reason = nil)
-      line = JSON.generate({cancel: path, reason:}.compact) + "\n"
+    def request_cancel(path, reason = nil) # :nodoc:
+      # Over a stream, a request names the run it is for, so it cannot reach another one by mistake
+      line = JSON.generate({cancel: path, reason:, run: (@source if @following)}.compact) + "\n"
       if (forward = @forward)
         forward.call(line)
         return :forwarded
@@ -238,7 +258,10 @@ class TaskProgress
       :moot
     end
 
-    # The parent may still end the subtree - when the remote went away, say
+    private
+
+    # The parent may still end the subtree - when the remote went away, say. From outside, end
+    # the mount's own task: `mount.task.done!`
     #: () -> self
     def done!
       finish(:done) { |tx| tx << Event.new(path: @path, op: :done) }
@@ -262,33 +285,45 @@ class TaskProgress
     #: () -> bool
     def finished? = task.finished?
 
-    private
-
     #: (Integer | Float, Integer | Float) -> void
     def watch(poll, give_up_after)
       reader = @reader or return
       beating = false
       silent_since = nil #: Float?
       until @stopping
-        catch_up(timeout: poll)
-        status = @log.snapshot[@path]&.status
-        break if status == :done || status == :canceled
-        if reader.alive?
-          beating = true
-          silent_since = nil
-          speaks_again if @silent
-        elsif beating && status != :failed
-          since = silent_since ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          @silent = true
-          mark_stale
-          if Process.clock_gettime(Process::CLOCK_MONOTONIC) - since >= give_up_after
-            fail!("Lost touch with whoever was working on it")
-            beating = false
+        begin
+          catch_up(timeout: poll)
+          status = @log.snapshot[@path]&.status
+          break if status == :done || status == :canceled
+          if reader.alive?
+            beating = true
+            silent_since = nil
+            speaks_again if @silent
+            # Given up on, and alive after all: read it afresh
+            reader.resync! if @gave_up
+          elsif beating && status != :failed
+            since = silent_since ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            @silent = true
+            mark_stale
+            if Process.clock_gettime(Process::CLOCK_MONOTONIC) - since >= give_up_after
+              @gave_up = true
+              fail!("Lost touch with whoever was working on it")
+              beating = false
+            end
           end
+        rescue => e
+          # The stream is away for a moment, say - keep trying, and say so
+          @log.on_error.call(e, self)
+          sleep(poll)
         end
       end
-    rescue => e
-      @log.on_output_error.call(e, self)
+    end
+
+    # Canceling the mount asks the remote to cancel its root - the run there is now, once
+    #: () -> void
+    def arm_cancel
+      generation = @generation += 1
+      task.on_cancel { |reason| request_cancel([], reason) if generation == @generation && !@remote_ended }
     end
 
     # The writer beats again, and nothing went missing meanwhile
@@ -327,11 +362,13 @@ class TaskProgress
       end
     end
 
-    #: () -> void
-    def mark_stale
+    # In the transaction given, or one of its own
+    #: (?Transaction?) -> void
+    def mark_stale(tx = nil)
       return if @stale
       @stale = true
-      @log.append(Event.new(path: @path, op: :meta, value: {stale: true}))
+      event = Event.new(path: @path, op: :meta, value: {stale: true})
+      tx ? tx << event : @log.append(event)
     end
 
     # The remote's events, moved under the mount - or nil if one would land too deep
@@ -375,10 +412,16 @@ class TaskProgress
 
     #: (Integer) -> Process::Status?
     def reap(pid)
-      @pid_lock.synchronize do
-        _, status = Process.wait2(pid)
-        @reaped = true
-        status
+      # Never waiting with the lock held, which would keep `stop` from sending TERM to a child
+      # that will not exit by itself - but reaping only with it, so a signal cannot slip in between
+      loop do
+        status = @pid_lock.synchronize do
+          _, exited = Process.wait2(pid, Process::WNOHANG)
+          @reaped = true if exited
+          exited
+        end
+        return status if status
+        sleep(0.02)
       end
     rescue Errno::ECHILD
       @reaped = true

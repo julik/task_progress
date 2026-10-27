@@ -24,21 +24,21 @@ class TaskProgress
       @clock = clock
     end
 
-    # A token for the log `log_id`, good for `expires_in` seconds
+    # A token for `subject` - a log id, a run, whatever the tokens are checked against - good for `expires_in` seconds
     #: (String, ?expires_in: Integer) -> String
-    def issue(log_id, expires_in: 3600)
-      payload = encode("#{log_id}\n#{@clock.call + expires_in}")
+    def issue(subject, expires_in: 3600)
+      payload = encode("#{subject}\n#{@clock.call + expires_in}")
       "#{payload}.#{sign(payload)}"
     end
 
-    # The log id the token was issued for, or nil if it is forged, mangled or expired
+    # What the token was issued for, or nil if it is forged, mangled or expired
     #: (String?) -> String?
     def verify(token)
       payload, signature = token.to_s.split(".", 2)
       return unless payload && signature && signature.bytesize == sign(payload).bytesize
       return unless OpenSSL.fixed_length_secure_compare(signature, sign(payload))
-      log_id, expires = decode(payload).split("\n", 2)
-      log_id if expires && Integer(expires, exception: false)&.>=(@clock.call)
+      subject, expires = decode(payload).split("\n", 2)
+      subject if expires && Integer(expires, exception: false)&.>=(@clock.call)
     rescue ArgumentError
       nil
     end

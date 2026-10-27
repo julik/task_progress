@@ -51,7 +51,7 @@ class TaskProgress
     #: () -> void
     def flush_progress
       return if @furthest == @reported || @task.finished?
-      @task.advance!(@furthest - @reported)
+      @task.advance(@furthest - @reported)
       @reported = @furthest
     end
 

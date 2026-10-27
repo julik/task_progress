@@ -9,62 +9,95 @@ class TaskProgress
   # streams only that task's subtree, with the subtask as the root.
   #
   #     # Rack
-  #     [200, TaskProgress::SSE::HEADERS, TaskProgress::SSE.new(task)]
+  #     TaskProgress::SSE.response(task)
   #     # Rails
   #     headers.merge!(TaskProgress::SSE::HEADERS)
   #     self.response_body = TaskProgress::SSE.new(task)
   #
-  # The tree must live in the serving process. For one that lives in a job elsewhere - handed
-  # off with TaskProgress.handoff - stream `TaskProgress.follow(key)` with `close: true`
+  # Given a key instead of a task - a tree handed off with TaskProgress.handoff - it follows that
+  # tree from the stream for as long as it streams, and stops following when the stream ends or
+  # the server closes it. `response` answers 404 for a key with nothing at it
   class SSE
     # What an SSE response is sent with
     HEADERS = {"content-type" => "text/event-stream", "cache-control" => "no-cache", "x-accel-buffering" => "no"}.freeze #: Hash[String, String]
 
     # @rbs @source: TaskProgress | Log
     # @rbs @heartbeat: Integer | Float
-    # @rbs @retry_ms: Integer
+    # @rbs @reconnect: Integer | Float
     # @rbs @close: bool
 
-    # A whole Rack response: status, headers and this body
-    #: (TaskProgress | Log, **untyped) -> [Integer, Hash[String, String], SSE]
-    def self.response(task, **) = [200, HEADERS.dup, new(task, **)]
+    # A whole Rack response: status, headers and this body - or a 404, for a key with nothing at it
+    #: (TaskProgress | Log | String, **untyped) -> [Integer, Hash[String, String], SSE | Array[String]]
+    def self.response(source, **)
+      [200, HEADERS.dup, new(source, **)]
+    rescue KeyError
+      [404, {"content-type" => "text/plain"}, ["Nothing to follow"]]
+    end
 
     # One batch as an SSE event
     #: (Batch) -> String
     def self.frame(batch) = "id: #{batch.seq}\nevent: batch\ndata: #{Wire.dump(batch)}\n\n"
 
-    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of
-    # quiet, and telling the browser to reconnect after `retry_ms`. With `close: true` it closes
-    # the task's log once the stream ends - for a tree followed only for this stream:
-    #
-    #     TaskProgress::SSE.response(TaskProgress.follow(key), close: true)
-    #: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer, ?close: bool) -> void
-    def initialize(task_or_log, heartbeat: 15, retry_ms: 2000, close: false)
-      @source = task_or_log
+    # Streams the task - its subtree only, for a subtask - or the tree handed off at a key, from
+    # `stream`. It pings every `heartbeat` seconds of quiet, and tells the browser to reconnect
+    # after `reconnect` seconds
+    #: (TaskProgress | Log | String, ?stream: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
+    def initialize(source, stream: TaskProgress.stream, heartbeat: 15, reconnect: 2)
+      @close = source.is_a?(String)
+      @source = source.is_a?(String) ? TaskProgress.follow(source, stream:) : source
       @heartbeat = heartbeat
-      @retry_ms = retry_ms
-      @close = close
+      @reconnect = reconnect
+    end
+
+    # Stops following a tree it followed by its key - Rack calls it when the response is over
+    #: () -> void
+    def close
+      log.close if @close
     end
 
     # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
     #: () { (String) -> void } -> void
     def each
       queue = Thread::Queue.new
-      output = @source.add_output(replay: true) { |batch, _log| queue << batch }
-      yield "retry: #{@retry_ms}\n\n"
+      behind = false
+      # A client that stops reading would have every batch pile up here. Past BACKLOG it gets
+      # one squash of the tree instead, as of when it reads on
+      output = @source.add_output(replay: true) do |batch, _log|
+        next queue << batch if queue.size < BACKLOG
+        behind = true
+        queue.clear
+      end
+      yield "retry: #{(@reconnect * 1000).round}\n\n"
+      # A task pruned away before anyone asked: a tree with nothing in it, and the end
+      return yield(SSE.frame(Batch.new(log: log.id, prev: 0, seq: [log.seq, 1].max, at: 0.0, events: []))) unless present?
       loop do
         batch = queue.pop(timeout: @heartbeat)
+        if behind
+          behind = false
+          batch = log.squashed(path)
+        end
         next yield(": ping\n\n") if batch.nil?
         yield SSE.frame(batch)
         break if finishes_root?(batch)
       end
     ensure
       @source.remove_output(output) if output
-      source = @source
-      (source.is_a?(Log) ? source : source.log).close if @close
+      close
     end
 
+    # How many batches wait for a slow client before it gets a squash instead
+    BACKLOG = 1000 #: Integer
+
     private
+
+    #: () -> Log
+    def log = (source = @source).is_a?(Log) ? source : source.log
+
+    #: () -> path
+    def path = (source = @source).is_a?(Log) ? [] : source.path
+
+    #: () -> bool
+    def present? = log.snapshot.key?(path)
 
     # Judged by what was sent, never by the snapshot: that runs ahead of delivery, and ending on
     # it could cut the stream before the batch that finished the root went out. An empty reset

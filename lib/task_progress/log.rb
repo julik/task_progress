@@ -34,7 +34,7 @@ class TaskProgress
     # @rbs @snapshot: State?
     # @rbs @touched: Set[path]
     # @rbs @on_cancel: Hash[path, Array[^(String?) -> void]]
-    # @rbs @on_output_error: ^(Exception, untyped) -> void
+    # @rbs @on_error: ^(Exception, untyped) -> void
     # @rbs @changed: Thread::ConditionVariable
     # @rbs @closers: Array[^() -> void]
 
@@ -56,18 +56,19 @@ class TaskProgress
       @snapshot = nil
       @touched = Set.new
       @on_cancel = {}
-      @on_output_error = ->(error, output) { warn("TaskProgress: #{output.inspect} raised #{error.class}: #{error.message}") }
+      @on_error = ->(error, output) { warn("TaskProgress: #{output.inspect} raised #{error.class}: #{error.message}") }
     end
 
     # Hears about an output that raised, with the error and the output; it warns by default
-    attr_accessor :on_output_error #: ^(Exception, untyped) -> void
+    attr_accessor :on_error #: ^(Exception, untyped) -> void
 
     # Runs the block under the lock, collecting what it adds with `tx.<<`; it commits as one
     # batch, or not at all if the block raises. A transaction opened inside another one on the
     # same fiber joins it. The block holds the lock throughout - keep it short, and never wait
-    # in it on another thread that writes to this log
-    #: [T] () { (Transaction) -> T } -> T
-    def transaction
+    # in it on another thread that writes to this log. `at` is the time it happens at - now,
+    # unless it relays what happened elsewhere, earlier
+    #: [T] (?at: Float?) { (Transaction) -> T } -> T
+    def transaction(at: nil) # :nodoc:
       if (tx = current)
         return yield(tx)
       end
@@ -76,7 +77,7 @@ class TaskProgress
       # log can never part ways
       result = Thread.handle_interrupt(Exception => :never) do
         @lock.synchronize do
-          opened = Transaction.new(@state, @clock.call, @random)
+          opened = Transaction.new(@state, at || @clock.call, @random)
           self.current = opened
           begin
             value = Thread.handle_interrupt(Exception => :immediate) { yield(opened) }
@@ -96,7 +97,7 @@ class TaskProgress
 
     # Commits the events as one batch
     #: (*Event) -> void
-    def append(*events) = transaction { |tx| events.each { tx << it } }
+    def append(*events) = transaction { |tx| events.each { tx << it } } # :nodoc:
 
     # An output is anything with `call(batch, log)`. Unless `replay: false`, it first gets the
     # tree so far as one squashed batch, `prev` 0, and then every batch after it. With a `path`
@@ -106,7 +107,7 @@ class TaskProgress
       # A block is a Proc, which is an output like any other
       output = output || (_ = block) || raise(ArgumentError, "An output, or a block")
       @lock.synchronize do
-        target = path.empty? ? output : Branch.new(output, path.dup.freeze, @id, @seq)
+        target = path.empty? ? output : Branch.new(output, path.dup.freeze, @id, @seq, started: replay && @state.key?(path))
         if replay && @state.key?(path)
           @outbox << [Batch.new(log: @id, prev: 0, seq: @seq, at: @clock.call, events: @state.squash(path).freeze), [target].freeze]
         end
@@ -116,7 +117,8 @@ class TaskProgress
       output
     end
 
-    # Takes the output as it was given to `add_output`
+    # Takes the output as it was given to `add_output`. It hears nothing more once this returns -
+    # save a batch being delivered to it on another thread just then
     #: (output) -> void
     def remove_output(output)
       @lock.synchronize { @outputs = @outputs.reject { it.equal?(output) || (it.is_a?(Branch) && it.output.equal?(output)) }.freeze }
@@ -214,7 +216,7 @@ class TaskProgress
         callbacks.each do |callback|
           callback.call(event.value)
         rescue => e
-          @on_output_error.call(e, callback)
+          @on_error.call(e, callback)
         end
       end
     end
@@ -244,9 +246,11 @@ class TaskProgress
             entry = @lock.synchronize { @outbox.shift } or next false
             batch, outputs = entry
             outputs.each do |output|
+              # One removed since the batch was committed hears no more of it
+              next unless @outputs.any? { it.equal?(output) }
               output.call(batch, self)
             rescue => e
-              @on_output_error.call(e, output)
+              @on_error.call(e, output)
             end
             call_cancel_callbacks(batch) unless @on_cancel.empty?
             true

@@ -8,13 +8,14 @@ class TaskProgress
   # streams only that task's subtree, with the subtask as the root.
   #
   #     # Rack
-  #     [200, TaskProgress::SSE::HEADERS, TaskProgress::SSE.new(task)]
+  #     TaskProgress::SSE.response(task)
   #     # Rails
   #     headers.merge!(TaskProgress::SSE::HEADERS)
   #     self.response_body = TaskProgress::SSE.new(task)
   #
-  # The tree must live in the serving process. For one that lives in a job elsewhere - handed
-  # off with TaskProgress.handoff - stream `TaskProgress.follow(key)` with `close: true`
+  # Given a key instead of a task - a tree handed off with TaskProgress.handoff - it follows that
+  # tree from the stream for as long as it streams, and stops following when the stream ends or
+  # the server closes it. `response` answers 404 for a key with nothing at it
   class SSE
     # What an SSE response is sent with
     HEADERS: Hash[String, String]
@@ -23,31 +24,45 @@ class TaskProgress
 
     @heartbeat: Integer | Float
 
-    @retry_ms: Integer
+    @reconnect: Integer | Float
 
     @close: bool
 
-    # A whole Rack response: status, headers and this body
-    # : (TaskProgress | Log, **untyped) -> [Integer, Hash[String, String], SSE]
-    def self.response: (TaskProgress | Log, **untyped) -> [ Integer, Hash[String, String], SSE ]
+    # A whole Rack response: status, headers and this body - or a 404, for a key with nothing at it
+    # : (TaskProgress | Log | String, **untyped) -> [Integer, Hash[String, String], SSE | Array[String]]
+    def self.response: (TaskProgress | Log | String, **untyped) -> [ Integer, Hash[String, String], SSE | Array[String] ]
 
     # One batch as an SSE event
     # : (Batch) -> String
     def self.frame: (Batch) -> String
 
-    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of
-    # quiet, and telling the browser to reconnect after `retry_ms`. With `close: true` it closes
-    # the task's log once the stream ends - for a tree followed only for this stream:
-    #
-    #     TaskProgress::SSE.response(TaskProgress.follow(key), close: true)
-    # : (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer, ?close: bool) -> void
-    def initialize: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer, ?close: bool) -> void
+    # Streams the task - its subtree only, for a subtask - or the tree handed off at a key, from
+    # `stream`. It pings every `heartbeat` seconds of quiet, and tells the browser to reconnect
+    # after `reconnect` seconds
+    # : (TaskProgress | Log | String, ?stream: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
+    def initialize: (TaskProgress | Log | String, ?stream: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
+
+    # Stops following a tree it followed by its key - Rack calls it when the response is over
+    # : () -> void
+    def close: () -> void
 
     # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
     # : () { (String) -> void } -> void
     def each: () { (String) -> void } -> void
 
+    # How many batches wait for a slow client before it gets a squash instead
+    BACKLOG: Integer
+
     private
+
+    # : () -> Log
+    def log: () -> Log
+
+    # : () -> path
+    def path: () -> path
+
+    # : () -> bool
+    def present?: () -> bool
 
     # Judged by what was sent, never by the snapshot: that runs ahead of delivery, and ending on
     # it could cut the stream before the batch that finished the root went out. An empty reset

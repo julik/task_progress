@@ -1,7 +1,7 @@
 # Generated from lib/task_progress/batch.rb with RBS::Inline
 
 class TaskProgress
-  # :nodoc:
+  # The unit of commit, see below
   class Batch < Data
     attr_reader log(): String?
 

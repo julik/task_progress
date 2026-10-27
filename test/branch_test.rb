@@ -7,15 +7,15 @@ class BranchTest < Minitest::Test
 
   def test_a_branch_sees_its_subtree_rooted_at_the_top
     root = TaskProgress.new("root", log: ticking_log)
-    root.subtask("Elsewhere").update_to(percent: 10)
+    root.subtask("Elsewhere").update(10)
     upload = root.subtask("Upload", total: 4)
     part = upload.subtask("Part")
-    part.advance!(1)
+    part.advance(1)
 
     batches, output = recording
     upload.add_output(output)
-    upload.advance!(2)
-    root.subtasks.first.update_to(percent: 20) # not in the branch
+    upload.advance(2)
+    root.subtasks.first.update(20) # not in the branch
     upload.subtasks.first.done!
 
     assert_equal [[[], :put], [[part.path.last], :put]], batches.first.events.map { [it.path, it.op] }
@@ -44,8 +44,8 @@ class BranchTest < Minitest::Test
   def test_a_branch_squashes_the_same_as_it_streams
     root = TaskProgress.new("root", log: ticking_log)
     branch = root.subtask("Branch", expect: 2)
-    branch.subtask("A").update_to(percent: 50)
-    branch.subtask("B", total: 3).advance!(1)
+    branch.subtask("A").update(50)
+    branch.subtask("B", total: 3).advance(1)
     batches, output = recording
     branch.add_output(output)
 
@@ -62,8 +62,8 @@ class BranchTest < Minitest::Test
     mirror = TaskProgress.new("mirror", log: ticking_log)
     mount = mirror.mount("Engine")
     branch.add_output { |batch, _| assert_equal :applied, mount << batch }
-    branch.advance!(4)
-    branch.subtask("Render").update_to(percent: 30)
+    branch.advance(4)
+    branch.subtask("Render").update(30)
 
     assert_equal source.log.snapshot.percent(branch.path), mount.task.percent
     assert_equal ["Warm up", "Render"], mount.task.subtasks.map(&:name)
@@ -74,7 +74,7 @@ class BranchTest < Minitest::Test
     root = TaskProgress.new("root")
     job = root.subtask("Job")
     step = job.subtask("Step")
-    step.advance!(3)
+    step.advance(3)
     batches, output = recording
     step.add_output(output)
 
@@ -131,8 +131,8 @@ class BranchTest < Minitest::Test
         task = live.sample(random: rng)
         case rng.rand(7)
         when 0, 1 then live << task.subtask("t", total: [nil, rng.rand(1..9)].sample(random: rng))
-        when 2 then task.update_to(percent: rng.rand(0..99))
-        when 3 then task.advance!(rng.rand(1..3))
+        when 2 then task.update(rng.rand(0..99))
+        when 3 then task.advance(rng.rand(1..3))
         when 4 then task.done!
         when 5 then task.note("n")
         when 6 then rng.rand(4).zero? && root.log.append(TaskProgress::Event.new(path: task.path, op: :prune))
@@ -143,5 +143,26 @@ class BranchTest < Minitest::Test
 
       assert_equal subtree(root.log.snapshot, watched.path), subtree(fold_batches(batches), []), "seed #{seed}"
     end
+  end
+
+  def test_a_branch_under_a_mount_starts_over_when_the_mount_does
+    root = TaskProgress.new("local")
+    mount = root.mount("Engine")
+    child = TaskProgress.new("remote", outputs: [->(batch, _) { mount << batch }])
+    step = child.subtask("Step")
+    branch_path = [*mount.path, step.path.last]
+    batches, output = recording
+    root.log.add_output(output, path: branch_path)
+    mount << child.log.squashed # a remote that restarted - the same tasks, put back
+    step.done!
+    assert_equal :done, fold_batches(batches)[[]].status, "still there, and still hearing"
+  end
+
+  def test_a_branch_made_before_its_task_starts_from_nothing
+    root = TaskProgress.new("local")
+    batches, output = recording
+    root.log.add_output(output, path: ["zzzz"])
+    root.log.transaction { |tx| tx << TaskProgress::Event.new(path: ["zzzz"], op: :open, value: {name: "Late"}) }
+    assert batches.first.reset?
   end
 end

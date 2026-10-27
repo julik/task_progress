@@ -18,11 +18,11 @@ class TaskProgress
     # : (String, ?clock: ^() -> Integer) -> void
     def initialize: (String, ?clock: ^() -> Integer) -> void
 
-    # A token for the log `log_id`, good for `expires_in` seconds
+    # A token for `subject` - a log id, a run, whatever the tokens are checked against - good for `expires_in` seconds
     # : (String, ?expires_in: Integer) -> String
     def issue: (String, ?expires_in: Integer) -> String
 
-    # The log id the token was issued for, or nil if it is forged, mangled or expired
+    # What the token was issued for, or nil if it is forged, mangled or expired
     # : (String?) -> String?
     def verify: (String?) -> String?
 

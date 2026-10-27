@@ -5,7 +5,7 @@ class TaskProgress
   # A store kept in this process, for where `Rails.cache` is not to hand - tests, a Rack app that
   # runs its jobs in-process. Anything with `read`, `write` and `delete` will do as a store; this
   # is the smallest one, and is safe to share between threads
-  class MemoryStore
+  class MemoryCache
     # @rbs @entries: Hash[String, untyped]
     # @rbs @lock: Thread::Mutex
 

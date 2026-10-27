@@ -10,7 +10,7 @@ class TurboTest < Minitest::Test
   def test_rows_are_drawn_as_the_browser_client_draws_them
     root = TaskProgress.new("Import <all>", log: TaskProgress::Log.new(clock: -> { 1_700_000_000.0 }))
     rows = root.subtask("Rows", total: 10)
-    rows.advance!(3, message: "row 3 & on")
+    rows.advance(3, message: "row 3 & on")
     wait = root.subtask("Wait", indeterminate: true)
     wait.note("in line")
     root.subtask("Broken").fail!("disk full")
@@ -62,8 +62,8 @@ class TurboTest < Minitest::Test
 
   def test_the_output_broadcasts_the_whole_tree_and_keeps_the_last_frame
     frames = []
-    store = TaskProgress::MemoryStore.new
-    output = TaskProgress::TurboStreamOutput.new(renderer:, broadcast: ->(html) { frames << html }, store:)
+    store = TaskProgress::MemoryCache.new
+    output = TaskProgress::TurboStreamOutput.new(renderer:, to: ->(html) { frames << html }, store:)
     root = TaskProgress.new("Root", outputs: [output])
     root.subtask("Rows").done!
     assert_equal root.log.seq, frames.length
@@ -74,8 +74,8 @@ class TurboTest < Minitest::Test
 
   def test_broadcast_draws_a_few_frames_however_spammy_the_work
     frames = []
-    result = TaskProgress.broadcast("tree", "Crunch", broadcast: ->(html) { frames << html }, interval: 0.05) do |r|
-      r.subtask("Items", total: 2000) { |t| 2000.times { t.tick! } }
+    result = TaskProgress.broadcast("tree", "Crunch", to: ->(html) { frames << html }, interval: 0.05) do |r|
+      r.subtask("Items", total: 2000) { |t| 2000.times { t.tick } }
       :crunched
     end
     assert_operator frames.length, :<, 50, "squashed, not one a tick"
@@ -88,12 +88,12 @@ class TurboTest < Minitest::Test
   end
 
   def test_a_cancel_button_reaches_a_job_through_the_store
-    store = TaskProgress::MemoryStore.new
+    store = TaskProgress::MemoryCache.new
     tokens = TaskProgress::CancelToken.new("s" * 32)
     app = TaskProgress::CancellationsApp.new(store:, tokens:)
     frames = Queue.new
     worker = Thread.new do
-      TaskProgress.broadcast("job-1", "Job", broadcast: ->(html) { frames << html }, store:, tokens:, cancel_url: "/cancel", interval: 0.01, poll: 0.02) do |root|
+      TaskProgress.broadcast("job-1", "Job", to: ->(html) { frames << html }, store:, tokens:, cancel_url: "/cancel", interval: 0.01, poll: 0.02) do |root|
         root.subtask("Rows", cancelable: true) { |t| loop { t.note("tick") && sleep(0.01) } }
         :carried_on
       end
@@ -106,12 +106,28 @@ class TurboTest < Minitest::Test
     status, headers, = app.call(env(path:, token:, accept: "text/vnd.turbo-stream.html, text/html"))
     assert_equal [200, "text/vnd.turbo-stream.html"], [status, headers["content-type"]], "a Turbo form gets an empty stream"
     assert_equal :carried_on, worker.value, "the job saw the request, and canceled the task"
-    assert_nil store.read(TaskProgress::CancellationsApp.request_key("task_progress/job-1", [path])), "taken up, and gone"
+    assert_match %r{\Atask_progress/job-1/[0-9a-z]{10}\z}, tokens.verify(token), "a token for this run alone"
+    assert_nil store.read(TaskProgress::CancellationsApp.request_key(tokens.verify(token), [path])), "taken up, and gone"
     assert_includes store.read("task_progress/job-1"), '<div class="row canceled"'
   end
 
+  def test_a_cancel_that_came_too_late_does_not_reach_the_next_run
+    store = TaskProgress::MemoryCache.new
+    tokens = TaskProgress::CancelToken.new("s" * 32)
+    app = TaskProgress::CancellationsApp.new(store:, tokens:)
+    frames = []
+    TaskProgress.broadcast("job-1", "Run 1", to: ->(html) { frames << html }, store:, tokens:, cancel_url: "/cancel", cancelable: true, poll: 0.01) { :done }
+    old_token = frames.last[/name="token" value="([^"]+)"/, 1] || tokens.issue("task_progress/job-1/elsewhere")
+    app.call(env(path: "", token: old_token))
+    second = TaskProgress.broadcast("job-1", "Run 2", to: ->(_) {}, store:, tokens:, cancel_url: "/cancel", cancelable: true, poll: 0.01) do |root|
+      sleep 0.1
+      root.status
+    end
+    refute_equal :canceled, second, "an old page's click is for the old run"
+  end
+
   def test_the_cancellations_app_turns_away_what_it_should
-    app = TaskProgress::CancellationsApp.new(store: TaskProgress::MemoryStore.new, tokens: TaskProgress::CancelToken.new("s" * 32))
+    app = TaskProgress::CancellationsApp.new(store: TaskProgress::MemoryCache.new, tokens: TaskProgress::CancelToken.new("s" * 32))
     token = TaskProgress::CancelToken.new("s" * 32).issue("task_progress/x")
     assert_equal 403, app.call(env(path: "abcd", token: "forged")).first
     assert_equal 403, app.call(env(path: "abcd", token: TaskProgress::CancelToken.new("t" * 32).issue("task_progress/x"))).first
@@ -127,7 +143,7 @@ class TurboTest < Minitest::Test
     chunks = Queue.new
     reader = Thread.new { TaskProgress::TurboSSE.new(root, renderer:, interval: 0.01, source: "src").each { chunks << it } }
     sleep 0.05
-    3.times { rows.tick! }
+    3.times { rows.tick }
     root.done!
     reader.join(2)
     all = [].tap { |a| a << chunks.pop until chunks.empty? }

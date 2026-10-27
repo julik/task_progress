@@ -13,7 +13,7 @@ class TaskProgress
   #       def test_import
   #         import = TaskProgress.new("Import")
   #         Importer.new(progress: import).run
-  #         assert_task_done import
+  #         assert_task_complete import
   #         assert_task_failed import.subtasks.first, with: /row 12/
   #       end
   #     end
@@ -23,8 +23,8 @@ class TaskProgress
 
     # The task is done, and everything under it ended
     #: (TaskProgress, ?String?) -> void
-    def assert_task_done(task, message = nil)
-      assert task.done?, message || "Expected '#{task.name}' to be done, but it is #{task.status}#{TaskProgress::Assertions.tree(task)}"
+    def assert_task_complete(task, message = nil)
+      assert task.complete?, message || "Expected '#{task.name}' to be complete, but it is #{task.status}#{TaskProgress::Assertions.tree(task)}"
     end
 
     # The task failed - with an error whose message matches `with`, if given

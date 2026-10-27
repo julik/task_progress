@@ -43,7 +43,7 @@ Timestamps are for display only. Order is `seq`, `prev`, the order of events in 
 ```ruby
 root = TaskProgress.new("Import")                     # a tree with no outputs
 root = TaskProgress.new("Import", outputs: [output])  # see Outputs
-root = TaskProgress.new("Import") { |percent:, message:| job.update!(percent:, message:) }  # a Summary
+root = TaskProgress.new("Import", outputs: [TaskProgress::SummaryOutput.new { |percent:, message:| job.update!(percent:, message:) }])
 ```
 
 `TaskProgress.null` is a silent root, for a library's default.
@@ -56,7 +56,7 @@ task = root.subtask("Rows", total: 120)
 
 | Option | |
 |---|---|
-| `total:` | Counted: driven with `advance!`/`tick!`, reads `count / total`. |
+| `total:` | Counted: driven with `advance`/`tick`, reads `count / total`. |
 | `weight:` | How much of the parent it is; 1 by default. |
 | `expect:` | How many children it will have. Those not opened yet count as zero, so the bar does not jump back when they open. |
 | `indeterminate:` | No measure of its own: counts as zero until done, and draws as a spinner or a sliding bar. |
@@ -70,8 +70,8 @@ With a block, `subtask` runs the block as the task's work and returns its value 
 
 | | |
 |---|---|
-| `update_to(percent:, message:)` | Sets the percent of an uncounted task. 100 finishes it. |
-| `advance!(n = 1, message:)`, `tick!(message:)` | Adds to the count. |
+| `update(percent, message:)` | Sets the percent of an uncounted task. 100 finishes it. |
+| `advance(n = 1, message:)`, `tick(message:)` | Adds to the count. |
 | `note(message)` | The latest thing it says, shown on its row. |
 | `puts(message)` | A line printed above the tree, which stays. The tree does not keep it - see [Outputs](#outputs). |
 | `total=`, `name=` | |
@@ -84,7 +84,9 @@ Anything that starts work - a percent, a count, a note, finishing - starts the t
 
 ### Reading them
 
-`name`, `status` (`:pending`, `:active`, `:done`, `:failed`, `:canceled`), `percent`, `fraction` (unrounded, 0..1), `count`, `total`, `message`, `error`, `done?`, `failed?`, `canceled?`, `finished?`, `cancelable?`, `parent`, `root`, `subtasks`, `find(path)` and `node` (the whole record, frozen). Reads come from a frozen snapshot, so they are safe from any thread.
+`name`, `status` (`:pending`, `:active`, `:done`, `:failed`, `:canceled`), `percent`, `fraction` (unrounded, 0..1), `count`, `total`, `message`, `error`, `attempt`, `failed?`, `canceled?`, `finished?`, `complete?`, `cancelable?`, `parent`, `root`, `subtasks`, `find(path)`, `outline` and `node` (the whole record, frozen). Reads come from a frozen snapshot, so they are safe from any thread.
+
+`finished?` is the task's own status: done, failed or canceled. `complete?` is the whole subtree: the task done, and everything under it ended - which is what reads 100%. `cancelable?` is the attribute, and not finished yet.
 
 `find` takes a path under this task, as an Array of ids or as the ids joined with a dash (`"x3k0-00af"`) - the way the browser client keys its rows.
 
@@ -93,7 +95,7 @@ Anything that starts work - a percent, a count, a note, finishing - starts the t
 ```ruby
 root.transaction do
   current.done!
-  following.update_to(percent: 0, message: "Starting")
+  following.update(0, message: "Starting")
 end
 ```
 
@@ -134,13 +136,13 @@ bar = TaskProgress.bar("Streaming")                    # no total: counts and sp
 ### iterate
 
 ```ruby
-TaskProgress.iterate(rows, "Importing") { |row| import(row) }  # a bar over a collection
+TaskProgress.bar("Importing", total: rows.size).iterate(rows) { |row| import(row) }  # a bar over a collection
 root.iterate(files, "Files") { |file| copy(file) }             # a subtask
 root.iterate(rows, "Rows").map { transform(it) }               # without a block, an Enumerator
 root.iterate(downloader, "Download", total: bytes, step: CHUNK)
 ```
 
-The total comes from `size`, never `count` - so a lazy enumerator stays lazy, and one with no size just counts. The task is done when the loop ends and failed with the error if the block raises. It advances in steps of a thousandth of the total, not once per item, so a loop over cheap items is not held up by its own progress. With `using TaskProgress::Refinements`, any Enumerable has `with_progress(name)`, in the files that ask for it.
+The total comes from `size`, never `count` - so a lazy enumerator stays lazy, and one with no size just counts. The task is done when the loop ends and failed with the error if the block raises. It advances in steps of a thousandth of the total, not once per item, so a loop over cheap items is not held up by its own progress; each item counts `step:` (1).
 
 ### track_io
 
@@ -149,7 +151,7 @@ download.run { IO.copy_stream(download.track_io(file), dest) }
 download.track_io(file) { |io| ZipKit::FileReader.read_zip_structure(io: io) }  # done when the block returns
 ```
 
-Reading the IO advances the task by bytes: `read`, line reads, `readpartial` and so `IO.copy_stream`. Readers seek - ZipKit reads the end of an archive first - so only the furthest position counts. It moves in steps of 0.1% of the total. It needs the optional `progressive_io` gem and an IO with a position; for a pipe or a socket, `advance!(chunk.bytesize)` as you go.
+Reading the IO advances the task by bytes: `read`, line reads, `readpartial` and so `IO.copy_stream`. Readers seek - ZipKit reads the end of an archive first - so only the furthest position counts. It moves in steps of 0.1% of the total. It needs the optional `progressive_io` gem and an IO with a position; for a pipe or a socket, `advance(chunk.bytesize)` as you go.
 
 ## On the command line
 
@@ -193,7 +195,7 @@ root.add_output { |batch, log| ... }
 root.remove_output(output)
 ```
 
-An output that raises does not stop the others; `log.on_output_error = ->(error, output) { }` hears about it (it warns by default).
+An output that raises does not stop the others; `log.on_error = ->(error, output) { }` hears about it (it warns by default).
 
 | Output | |
 |---|---|
@@ -202,7 +204,7 @@ An output that raises does not stop the others; `log.on_output_error = ->(error,
 | `SummaryOutput.new { \|percent:, message:\| }` | The root's percent and the latest thing said, called only when either changes. For a progress column in a database. |
 | `NDJSONOutput.new(io)` | One batch per line, for a Mount at the other end of a pipe. |
 | `PublishingOutput.new(stream, event_name: "task_progress")` | Each batch as a JSON-ready Hash to anything with `publish(name, payload)` - a Sossego stream. |
-| `StreamOutput.new(stream, key, beat:)` | Each batch to a stream, with snapshots for late readers - what `handoff` and `adopt` write through, see [Handing work off](#handing-work-off). |
+| `StreamOutput.new(stream, key, heartbeat:)` | Each batch to a stream, with snapshots for late readers - what `handoff` and `adopt` write through, see [Handing work off](#handing-work-off). |
 | `RecordingOutput.new` | Keeps every batch, for a test - see [Testing](#testing). |
 | `BufferedOutput.new(output, interval: 0.25)` | A thread between the log and a slow output. What piles up while it works goes out squashed into one batch: the prunes, then a put for every node touched. |
 | `RactorOutput.new(port)` | Each batch as a deep frozen copy to a `Ractor::Port`. Ruby 4.0 only. |
@@ -232,7 +234,7 @@ A **mount** is a node whose subtree is fed from elsewhere. The remote's root lan
 ```ruby
 mount << batch     # a Batch, its Hash form, or a line of NDJSON
 # => :applied, :duplicate, :gap or :rejected
-mount.follow(io)   # reads NDJSON until EOF
+mount.read(io)     # reads NDJSON until EOF
 mount.stale?
 ```
 
@@ -245,7 +247,7 @@ A batch already applied is a duplicate - ordinary after a reconnect. One that do
 - A child that exits without finishing its root fails the mount. One that exits with an error fails it with that.
 - Canceling the mount asks the child to cancel its root, and sends TERM if it is still running `grace` seconds later. The pid is only ever signaled while it is still ours.
 - Interrupted (Ctrl-C, a timeout), `spawn` terminates the child at once and cancels or fails the mount.
-- The parent may end the mount itself, when the remote went away: `mount.done!`, `fail!`, `cancel!`. Whatever the remote sends after that changes nothing.
+- The parent may end the mount itself, when the remote went away: `mount.task.done!`, `fail!`, `cancel!`. Whatever the remote sends after that changes nothing.
 
 ### Ractors
 
@@ -287,7 +289,7 @@ The tree lives in a **stream** - Redis in production - under its `key`, so anyth
 | `TaskProgress.fetch(key)` | The same, read once - for a page, or a single poll. |
 | `mount.follow_stream(stream, key)` | Mounts it under a node of a live tree, see [Other processes](#other-processes-and-ractors). |
 
-Adopting **starts the tree over**: the worker writes a fresh log whose first batch has `prev` 0, and followers replace what they had. That is what makes a retry clean. Whoever wrote before - the side that handed it off, a run that was given up on - is ignored from then on (a follower answers its batches with `:superseded`), so two writers never interleave.
+Adopting **starts the tree over**: the worker writes a fresh log whose first batch has `prev` 0, and followers replace what they had. That is what makes a retry clean. Whoever wrote before - the side that handed it off, a run that was given up on - is ignored from then on (a mount fed from the stream answers its batches with `:superseded`, a fifth outcome next to those of `<<`), so two writers never interleave.
 
 ### Streams
 
@@ -312,7 +314,7 @@ Another kind of stream is anything with `append(key, data) -> id`, `read(key, af
 
 ### When the worker goes away
 
-A worker beats every second (`beat:`), and takes the cancel requests that came while it does. A follower that has seen it beat and then hears nothing marks the tree stale, and after a minute of that (`give_up_after:`) fails it - "Lost touch with whoever was working on it". A tree nobody has taken up yet is waiting, not silent, and never goes stale.
+A worker beats every second (`heartbeat:`), and takes the cancel requests that came while it does. A follower that has seen it beat and then hears nothing marks the tree stale, and after a minute of that (`give_up_after:`) fails it - "Lost touch with whoever was working on it". A tree nobody has taken up yet is waiting, not silent, and never goes stale.
 
 A failed tree is still followed: if the work is **retried**, the new run replaces the old one, its root says which attempt it is (`root.node.attempt`, drawn as "attempt 2" from the second on), and nothing of the lost run stays mixed in. A tree that is done or canceled is followed no more.
 
@@ -375,7 +377,7 @@ Most work notices a cancel on its own; the rest needs a line or two.
 
 ```ruby
 root.subtask("Rows", total: rows.size, cancelable: true) do |t|
-  rows.each { import(it) && t.tick! }
+  rows.each { import(it) && t.tick }
 end
 root.subtask("Publish") { publish! }  # still runs if Rows was canceled
 ```
@@ -384,7 +386,7 @@ root.subtask("Publish") { publish! }  # still runs if Rows was canceled
 
 ```ruby
 root.subtask("Export", cancelable: true) do |t|
-  File.open(tmp, "w") { |f| rows.each { f.puts(it) && t.tick! } }
+  File.open(tmp, "w") { |f| rows.each { f.puts(it) && t.tick } }
 rescue TaskProgress::Canceled
   File.delete(tmp)  # no half-written export
   raise
@@ -416,7 +418,7 @@ Re-raising is the simplest way to stop, since `run` then ends the task. Breaking
 ```ruby
 rows.each do |row|
   import(row)
-  rows.tick!
+  rows.tick
 rescue TaskProgress::Canceled
   break  # this row is whole - stop before the next one
 end
@@ -457,61 +459,56 @@ Only `cancelable` tasks can be asked for. Sign the right to ask, so a cancel can
 ```ruby
 tokens = TaskProgress::CancelToken.new(ENV.fetch("TASK_PROGRESS_SECRET"))  # 32 bytes or more
 token = tokens.issue(root.log.id, expires_in: 3600)  # into the page, next to the stream URL
-tokens.verify(params[:token])                         # => the log id it was issued for, or nil
+tokens.verify(params[:token])                         # => what it was issued for, or nil
 ```
 
-A token is an HMAC-SHA256 over a log id and an expiry, checked in constant time. It says the bearer may ask for tasks in that tree to be canceled; which tasks is for `cancelable` to say.
+A token is an HMAC-SHA256 over a subject - a log id, a run - and an expiry, checked in constant time. It says the bearer may ask for tasks in that tree to be canceled; which tasks is for `cancelable` to say. Issue one per run, so a page left open from one run cannot reach the next.
 
-Treat a cancellation as a resource rather than a call. The bench does it like this:
+`CancellationsApp` takes the requests for a tree that runs in another process, as Rails' cancel buttons do. A cancellation is a resource you create, not a call:
 
 ```
-POST /jobs/:id/cancellations    {"path": "x3k0-00af", "token": "..."}
-  201  {"id": "x3k0-00af", "path": "x3k0-00af", "state": "canceled"}   Location: /jobs/:id/cancellations/x3k0-00af
-  200  the same cancellation, when asked again
-  403  no token, a mangled one, an expired one, or another job's
-  409  the task is not cancelable
+POST /task_progress/cancellations    path=x3k0-00af&token=...    (a form, or JSON)
+  202  {"path": "x3k0-00af", "state": "requested"}   (a Turbo form gets an empty Turbo Stream instead)
+  403  no token, a mangled one, or an expired one
   422  a malformed path
-GET  /jobs/:id/cancellations/:id
+  405  anything but a POST
 ```
 
-Its `state` is `canceled`, `requested` while a child process has been asked and has not answered down the stream yet, or `moot`. A moot request still gets a 201 - the job finished first, or is gone, and that is no error. See `examples/web/app.rb`.
+It cannot cancel anything itself: it leaves the request in the store, where the run it is for picks it up - or does not, if it has ended, and the request expires after ten minutes. Either way the outcome shows in the tree.
+
+For a tree in the serving process, call `request_cancel` and answer with what came of it - the bench does, in `examples/web/app.rb`. For one handed off, `TaskProgress.fetch(key).request_cancel(path)` sends the request through the stream, see [RECIPES](RECIPES.md).
 
 ## Server-Sent Events
 
 ```ruby
-[200, TaskProgress::SSE::HEADERS, TaskProgress::SSE.new(task)]  # Rack
-TaskProgress::SSE.response(task)                                 # the same
+TaskProgress::SSE.response(task)                                 # Rack
+TaskProgress::SSE.response(key)                                  # a tree handed off - 404 for a key with nothing at it
 
 headers.merge!(TaskProgress::SSE::HEADERS)                       # Rails
 self.response_body = TaskProgress::SSE.new(task)
 ```
 
-First the tree so far, squashed into one batch with `prev` 0, then every batch as it commits - each in a `batch` event whose `id:` is its seq. A browser that reconnects starts over from a fresh squash, which is always right and costs a few puts. It pings every `heartbeat:` seconds (15) while nothing happens, and ends once the task it streams has finished. Given a subtask, it streams only that branch.
+First the tree so far, squashed into one batch with `prev` 0, then every batch as it commits - each in a `batch` event whose `id:` is its seq. A browser that reconnects starts over from a fresh squash, which is always right and costs a few puts. It pings every `heartbeat:` seconds (15) while nothing happens, tells the browser to come back after `reconnect:` seconds (2) if the connection drops, and ends once the task it streams has finished - or at once, with an empty tree, for a task that is no longer there. Given a subtask, it streams only that branch.
 
-The tree must live in the serving process. For one handed off to a job elsewhere, stream a tree that follows it, and stop following when the stream ends:
-
-```ruby
-TaskProgress::SSE.response(TaskProgress.follow(key), close: true)
-```
+Given a key, it follows the tree handed off there for as long as it streams, and stops when the stream ends or the server closes it. A client that stops reading gets a fresh squash when it reads on, rather than a backlog that grows for ever.
 
 ## Polling
 
 For where SSE does not get through - a proxy that buffers, a host that cuts long responses, a client that is not a browser:
 
 ```ruby
-TaskProgress::Poll.response(task, env)                                      # Rack
-TaskProgress::Poll.response(TaskProgress.fetch(key), env)                   # a tree handed off
-TaskProgress::Poll.response(TaskProgress.follow(key), env, close: true)     # ...long-polled
+TaskProgress::Poll.response(task, env)    # Rack
+TaskProgress::Poll.response(key, env)     # a tree handed off - 404 for a key with nothing at it
 ```
 
-Every answer is the whole tree, squashed into one batch with `prev` 0, with an ETag that says which tree it is. Sent back in `If-None-Match`, it gets a 304 until something changes. With `?wait=N` the request is held up to N seconds (`max_wait:`, 25) for a change - long polling, which holds a server thread that long, but answers the moment there is news.
+Every answer is the whole tree, squashed into one batch with `prev` 0, with an ETag that says which tree it is. Sent back in `If-None-Match` - weak (`W/"..."`, as a compressing proxy makes it) or not - it gets a 304 until something changes. With `?wait=N` the request is held up to N seconds (`max_wait:`, 25) for a change - long polling, which holds a server thread that long, but answers the moment there is news.
 
 ```js
-followPollingAt("/jobs/42/poll", (tree, changes) => draw(tree), { interval: 1000 })  // every second
-followPollingAt("/jobs/42/poll", draw, { wait: 25 })                                 // long polling
+followPollingAt("/jobs/42/poll", (tree, changes) => draw(tree), { poll: 1 })  // every second
+followPollingAt("/jobs/42/poll", draw, { wait: 25 })                          // long polling
 ```
 
-A poll that fails is tried again later and later, up to half a minute apart. The Stimulus controller polls given a `poll` value (seconds between polls) or a `wait` value (to long-poll); `TaskTreeView` and `useTaskTree` take `poll` and `wait` too.
+Everything is in seconds. A poll that fails is tried again later and later, up to half a minute apart; long polls go out a quarter of a second apart at the least. Polling stops once the root has finished, or the task is gone. The Stimulus controller polls given a `poll` value (seconds between polls) or a `wait` value (to long-poll); `TaskTreeView` and `useTaskTree` take `poll` and `wait` too.
 
 ## The browser client
 
@@ -526,20 +523,20 @@ The Stimulus controller and the React component import `@hotwired/stimulus`, `re
 ### task_tree.js
 
 ```js
-import { followEventSourceAt, followPollingAt, followBatches, applyBatchTo, requestCancel, pathKey, TaskTree } from "/task_progress/task_tree.js"
+import { followEventSourceAt, followPollingAt, batchFeed, requestCancel, pathKey, TaskTree } from "/task_progress/task_tree.js"
 
 const following = followEventSourceAt("/jobs/42/progress", (tree, changes) => draw(tree))
 following.close()
 
-const feed = followBatches((tree, changes) => draw(tree))  // for batches from anywhere: a WebSocket, ActionCable
+const feed = batchFeed((tree, changes) => draw(tree))  // for batches from anywhere: a WebSocket, ActionCable
 feed.push(batch)                                            // => "applied", "duplicate" or "gap"
 
-applyBatchTo(batch, tree)                                   // one batch, folded in place
+tree.apply(batch)                                           // one batch, folded in place
 ```
 
 A path's key is its ids joined with a dash - `pathKey(["x3k0", "00af"])` is `"x3k0-00af"`, and `pathFromKey` splits it back. Ids never contain a dash, so it needs no escaping in a URL, a class name or a data attribute. The root's key is the empty string. As a DOM id, prefix it (`task-x3k0-00af`): an id that starts with a digit needs `CSS.escape` in a selector.
 
-`TaskTree` folds batches the same way the Ruby side does, and a test holds the two to the same percent for every node. `tree.apply(batch)` returns `"applied"`, `"duplicate"` for one it already has, or `"gap"` - the tree is then `stale` until a batch with `prev` 0 arrives. `followEventSourceAt` reconnects on a gap, and the server starts it over from a fresh squash; with `followBatches` that is yours to do.
+`TaskTree` folds batches the same way the Ruby side does, and a test holds the two to the same percent for every node. `tree.apply(batch)` returns `"applied"`, `"duplicate"` for one it already has, or `"gap"` - the tree is then `stale` until a batch with `prev` 0 arrives. `followEventSourceAt` reconnects on a gap, and the server starts it over from a fresh squash; with `batchFeed` that is yours to do.
 
 A batch in a version of the wire format other than its own is `"unsupported"`, and changes nothing. `get(path)`, `root`, `childrenOf(node)`, `each()` (pre-order), `rows()` (what to draw, see [Big trees](#big-trees)), `percentOf(node)`, `complete(node)`, `fraction(node)`. Elapsed times are measured on the writer's clock: `now()` takes off the smallest gap seen between this clock and a batch's commit time, which has the least time in transit in it.
 
@@ -586,7 +583,7 @@ A graft is drawn as a child of its server task and counts towards it. It is kept
 
 Only this page sees a graft - other viewers, the terminal and the server's own percent know nothing of it. The cancel button on a local task cancels it here, never asking the server. Sharing browser work with the server is in [TODO](TODO.md).
 
-React takes grafts as a prop, `<TaskTreeView url={url} grafts={[{ path, local: work }]} />`; keep the array the same one while it does not change.
+React takes grafts as a prop, `<TaskTreeView url={url} grafts={[{ path, local: work }]} />` - an array written inline is fine.
 
 #### Uploads
 
@@ -640,12 +637,12 @@ Changing the url value follows the new stream. Draws once a frame at most, and t
 ### React
 
 ```js
-import { TaskTreeView, useTaskTree, mountTaskTree } from "/task_progress/react_task_tree.js"
+import { TaskTreeView, useTaskTree, createTaskTreeRoot } from "/task_progress/react_task_tree.js"
 
 <TaskTreeView url="/jobs/42/progress" cancelUrl="/jobs/42/cancellations" cancelToken={token} />
 <TaskTreeView url="/jobs/42/progress" onCancel={async (row) => ...} />  // return false to release the button
-const tree = useTaskTree(url)                                            // draw it yourself
-mountTaskTree(element).followEventSourceAt(url, { cancelUrl, cancelToken })  // on a page that is not a React app
+const tree = useTaskTree(url, { poll, wait, grafts })                    // draw it yourself
+createTaskTreeRoot(element).render({ url, cancelUrl, cancelToken })      // on a page that is not a React app
 ```
 
 ### Rows and cancel buttons
@@ -668,29 +665,29 @@ TaskProgress.broadcast(import, "Importing") { |root| ... }    # in a job, anywhe
 <%= task_progress_tree @import %>                               <%# in its page %>
 ```
 
-Then put `task_tree.css` on the page, and import `task_progress_clock.js` for elapsed times to tick. The Railtie adds `js/` to the asset path, so `stylesheet_link_tag "task_tree"` and an import map `pin "task_progress_clock"` find them.
+Then put `task_tree.css` on the page, and import `task_progress_clock.js` for elapsed times to tick. The Railtie serves `js/` as it is at `/task_progress/js` (`config.task_progress.js_path`, nil for none): `<link rel="stylesheet" href="/task_progress/js/task_tree.css">`, and `pin "task_progress/clock", to: "/task_progress/js/task_progress_clock.js"` in the import map.
 
 - **Every frame is the whole tree**, drawn by HTMLRenderer and sent as `<turbo-stream action="replace" method="morph">`, at most every `interval:` seconds (0.25) however spammy the job is. A Turbo Stream has no seq and no gaps to notice; a page that missed a frame, or joined late, is set right by the next one. Morphing changes only what differs, so a bar eases to its new width.
 - **The last frame is kept in `Rails.cache`**, under `task_progress/<dom_id>`, for the helper to draw before the first broadcast arrives.
 - **The stream is `[record, :task_progress]`**, and the tree's element has the id `dom_id(record, :task_progress)`.
 - **Cancel buttons are plain forms.** A cancelable task's button posts its path and a signed token (CancelToken, keyed off the app's `secret_key_base`) to `/task_progress/cancellations`, a route the Railtie adds. The job is in another process, so the route cannot cancel it: it leaves the request in `Rails.cache`, where the job looks for it every `poll:` seconds (1) and decides, as it does for any request. Its next frame shows the cancel. Set `config.task_progress.cancellations_path` to put the route elsewhere, or to nil for none.
 
-`broadcast:`, `store:`, `tokens:`, `cancel_url:` and `renderer:` override what Rails would give. With a block, `broadcast` runs it as the root's work and returns its value; without one it returns the root, finished at exit.
+`to:`, `store:`, `tokens:`, `cancel_url:` and `renderer:` override what Rails would give; `interval:` and `poll:` are the seconds between frames, and between looks for cancel requests. With a block, `broadcast` runs it as the root's work and returns its value; without one it returns the root, finished at exit.
 
 ### Without Rails
 
 Nothing of the above needs Rails - only the defaults do:
 
 ```ruby
-TaskProgress.broadcast("import-tree", "Importing", broadcast: ->(frame) { hub.publish(frame) }, store: TaskProgress::MemoryStore.new) { ... }
+TaskProgress.broadcast("import-tree", "Importing", to: ->(frame) { hub.publish(frame) }, store: TaskProgress::MemoryCache.new) { ... }
 ```
 
-`broadcast:` gets each frame, a `<turbo-stream>` element as a String; `store:` is anything with `read`, `write` and `delete`. `CancellationsApp.new(store:, tokens:)` is the Rack app behind the cancel buttons.
+`to:` gets each frame, a `<turbo-stream>` element as a String; `store:` is anything with `read`, `write(key, value, expires_in:)` and `delete`, as `Rails.cache` and `MemoryCache` are. `CancellationsApp.new(store:, tokens:)` is the Rack app behind the cancel buttons.
 
 For a tree in the serving process, `TurboSSE` streams it straight to a page, over Server-Sent Events:
 
 ```ruby
-[200, TaskProgress::TurboSSE::HEADERS, TaskProgress::TurboSSE.new(task, renderer: TaskProgress::HTMLRenderer.new(id: "tree"), source: "tree-source")]
+TaskProgress::TurboSSE.response(task, renderer: TaskProgress::HTMLRenderer.new(id: "tree"), source: "tree-source")
 ```
 
 ```html
@@ -698,7 +695,7 @@ For a tree in the serving process, `TurboSSE` streams it straight to a page, ove
 <div id="tree" class="tree"></div>
 ```
 
-When the task finishes it sends the last frame and removes the `<turbo-stream-source>`, so the browser does not reconnect to a finished stream. The bench's third pane is drawn this way.
+When the task finishes it sends the last frame and removes the element with the id `source:` - the `<turbo-stream-source>` - so the browser does not reconnect to a finished stream. Without `source:` the browser comes back every `reconnect:` seconds (2), and gets the last frame each time. Given a key instead of a task, it follows the tree handed off there. The bench's third pane is drawn this way.
 
 ### Drawing rows your own way
 
@@ -712,9 +709,9 @@ The tree itself keeps every task. What that costs, from `examples/benchmark.rb` 
 
 | | |
 |---|---|
-| `tick!` with no outputs | ~110,000 a second |
-| `tick!` adopted, to a stream | ~80,000 a second |
-| `tick!` from 4 threads on one tree | ~85,000 a second |
+| `tick` with no outputs | ~110,000 a second |
+| `tick` adopted, to a stream | ~80,000 a second |
+| `tick` from 4 threads on one tree | ~85,000 a second |
 | `subtask` with 100,000 siblings | ~68,000 a second |
 | Memory | ~800 bytes a task |
 | Squashing 100,000 tasks | 0.9s |
@@ -760,7 +757,7 @@ class ImportTest < Minitest::Test
     recording = TaskProgress::RecordingOutput.new
     import = TaskProgress.new("Import", outputs: [recording])
     Importer.new(progress: import).run
-    assert_task_done import
+    assert_task_complete import
     assert_task_failed import.subtasks.last, with: /row 12/
     assert_includes recording.said, "Skipped 3 rows"
   end
@@ -774,7 +771,7 @@ end
   {name: "Rows", status: :failed, percent: 40, count: 4, total: 10, error: "RuntimeError: row 5"}]}
 ```
 
-`assert_task_done`, `assert_task_failed(task, with:)` and `assert_task_canceled` show the whole tree's outline when they fail. `RecordingOutput` keeps every batch: `batches`, `events(op)`, `said` and `outline`.
+`assert_task_complete`, `assert_task_failed(task, with:)` and `assert_task_canceled` show the whole tree's outline when they fail. `RecordingOutput` keeps every batch: `batches`, `events(op)`, `said` and `outline`.
 
 For the tests of code that draws or relays trees:
 

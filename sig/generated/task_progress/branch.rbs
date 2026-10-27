@@ -8,8 +8,14 @@ class TaskProgress
   # Since batches get left out, a branch numbers its own: `log` is the log's id with the branch
   # path appended, and its `prev`/`seq` follow on from each other just like the log's do.
   #
-  # Pruning an ancestor takes the branch's node away for good, since a pruned path is never
-  # given out again. The branch then sends one last reset with nothing in it, and falls silent
+  # Pruning an ancestor takes the branch's node away. Usually for good, since a pruned path is
+  # never given out again - and the branch then sends one last reset with nothing in it, and
+  # falls silent. But a Mount starting over (a remote that restarted, a stream resynced) prunes
+  # its subtree and puts the same tasks back in the same batch: the branch's node comes back,
+  # and the branch starts over with it.
+  #
+  # Its first batch always starts from nothing, `prev` 0: one for a node that comes into being
+  # after the branch was made carries the node's `open`
   class Branch
     # The output the branch feeds
     attr_reader output: output
@@ -24,13 +30,15 @@ class TaskProgress
 
     @gone: bool
 
+    @started: bool
+
     # The log id of the branch at `path`
     # : (String, path) -> String
     def self.id: (String, path) -> String
 
     # For an output, the branch at `path` of the log `log_id`, numbering on from `seq`
-    # : (output, path, String, Integer) -> void
-    def initialize: (output, path, String, Integer) -> void
+    # : (output, path, String, Integer, ?started: bool) -> void
+    def initialize: (output, path, String, Integer, ?started: bool) -> void
 
     # Passes on what of the batch is in the branch, moved to its root
     # : (Batch, Log) -> void

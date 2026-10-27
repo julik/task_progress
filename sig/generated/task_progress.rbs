@@ -7,7 +7,7 @@
 #
 #     TaskProgress.cli("Import") do |root|
 #       root.subtask("Download", unit: "bytes") { |t| t.track_io(io) ... }
-#       root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
+#       root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick } }
 #     end
 class TaskProgress
   # A task's place in the tree: its ancestors' ids, then its own - `[]` is the root
@@ -72,7 +72,7 @@ class TaskProgress
   # exit, finished or not
   #
   #     bar = TaskProgress.bar("Importing", total: rows.size)
-  #     rows.each { import(it) && bar.tick! }
+  #     rows.each { import(it) && bar.tick }
   # : (?String, ?total: Integer?, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
   def self.bar: (?String, ?total: Integer?, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
 
@@ -86,12 +86,6 @@ class TaskProgress
   # : (output?) -> void
   def self.close: (output?) -> void
 
-  # A bar over a collection, see `bar` and `iterate`
-  #
-  #     TaskProgress.iterate(rows, "Importing") { |row| import(row) }
-  # : (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
-  def self.iterate: (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
-
   # A root whose tree is drawn in pages with Turbo, from wherever it runs - a job, say. Every
   # frame is the whole tree as HTML (see HTMLRenderer), sent as a Turbo Stream at most every
   # `interval` seconds, and kept in `store` for a page to draw before the first one arrives.
@@ -104,13 +98,14 @@ class TaskProgress
   #
   # In Rails, the target is a record, and the rest comes from RailsDefaults: Turbo::StreamsChannel,
   # Rails.cache and the route the Railtie adds. Outside Rails the target is the element's id, and
-  # `broadcast:` - called with each frame - is up to you
-  # : (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) -> TaskProgress
-  # : [T] (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) { (TaskProgress) -> T } -> T?
-  def self.broadcast: (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) -> TaskProgress
-                    | [T] (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) { (TaskProgress) -> T } -> T?
+  # `to:` - called with each frame - is up to you
+  # : (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) -> TaskProgress
+  # : [T] (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) { (TaskProgress) -> T } -> T?
+  def self.broadcast: (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) -> TaskProgress
+                    | [T] (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) { (TaskProgress) -> T } -> T?
 
-  # Picks up the requests CancellationsApp leaves in the store, until the root has ended
+  # Picks up the requests CancellationsApp leaves in the store, until the root has ended. A store
+  # that fails for a moment is tried again at the next poll
   # : (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
   def self.watch_cancellations: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
 
@@ -142,25 +137,35 @@ class TaskProgress
   # its own, with the name and attributes it was handed off with. It starts the tree over: a
   # second worker to adopt it, a job retried, replaces what the last one wrote.
   #
-  # Batches go out squashed, every `interval` seconds at most. Every `beat` seconds it tells
+  # Batches go out squashed, every `interval` seconds at most. Every `heartbeat` seconds it tells
   # whoever follows that it is alive, and takes the cancel requests that came. With a block,
   # the block is the root's work, see `run`, and it all stops when the block returns. Without
   # one, call `log.close` once the work is over - ActiveJob does this by itself, see JobSerializer
-  # : (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
-  # : [T] (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
-  def self.adopt: (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
-                | [T] (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  # : (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+  # : [T] (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  def self.adopt: (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+                | [T] (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+
+  # Draws the tree handed off at `key` where a command-line program draws one (see `cli`) until it
+  # finishes, and returns it. Ctrl-C stops watching, and leaves the work alone. What
+  # `task_progress watch` does
+  # : (String, ?stream: untyped, ?io: IO | StringIO) -> TaskProgress
+  def self.watch: (String, ?stream: untyped, ?io: IO | StringIO) -> TaskProgress
 
   # A tree that mirrors the one in `stream` at `key`, kept up to date on a thread of its own -
-  # for drawing it anywhere: a terminal, an SSE or polling endpoint, a parent's tree. Requests
-  # to cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and
-  # fails after `give_up_after` seconds of that, see Mount#follow_stream. Call `log.close` to stop
-  # following - SSE and Poll can do it for you when they are done
+  # for drawing it anywhere: a terminal, a parent's tree, an endpoint of your own. Requests to
+  # cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and fails
+  # after `give_up_after` seconds of that, see Mount#follow_stream. With a block, it follows for
+  # as long as the block runs; without one, `log.close` stops it. SSE and Poll take the key
+  # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError
   # : (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+  # : [T] (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
   def self.follow: (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+                 | [T] (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
 
   # The tree in `stream` at `key` as it is now, read once - for a page, or one poll, that needs
-  # no more than that. See `follow` for one kept up to date
+  # no more than that. See `follow` for one kept up to date. A key nothing was handed off at -
+  # or whose tree has expired - is a KeyError, as with Hash#fetch
   # : (String, ?stream: untyped) -> TaskProgress
   def self.fetch: (String, ?stream: untyped) -> TaskProgress
 
@@ -175,8 +180,8 @@ class TaskProgress
   def self.within: [T] (Array[TaskProgress]) { () -> T } -> T?
 
   # A root that is a mount and nothing else, named after `key` until the stream says otherwise
-  # : (String) -> [TaskProgress, Mount]
-  def self.mirror: (String) -> [ TaskProgress, Mount ]
+  # : (String, untyped) -> [TaskProgress, Mount]
+  def self.mirror: (String, untyped) -> [ TaskProgress, Mount ]
 
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
   # : (untyped) -> Integer?
@@ -192,11 +197,9 @@ class TaskProgress
   # : (?String) -> TaskProgress
   def self.null: (?String) -> TaskProgress
 
-  # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
-  # and `message:` as the tree changes. See `subtask` for `autofinish`. `attempt` says which
-  # run of the work this is - from 2 on, it is drawn with the task; `adopt` counts them
-  # : (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool, ?attempt: Integer?) ?{ (percent: Integer, message: String?) -> void } -> void
-  def initialize: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool, ?attempt: Integer?) ?{ (percent: Integer, message: String?) -> void } -> void
+  # A new tree, and its root. See `subtask` for `autofinish`
+  # : (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) -> void
+  def initialize: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) -> void
 
   # The attributes an `open` carries, without what is at its default
   # : (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?attempt: Integer?) -> Hash[Symbol, untyped]
@@ -222,6 +225,11 @@ class TaskProgress
   # The node at `path` in `state` as an outline, see TaskProgress#outline
   # : (State, path) -> Hash[Symbol, untyped]
   def self.outline: (State, path) -> Hash[Symbol, untyped]
+
+  # Which run of the work this is, for a root taken up with `adopt`: 1, then 2 for a retry, and
+  # so on. Drawn with the task from 2 on. Nil for any other task
+  # : () -> Integer?
+  def attempt: () -> Integer?
 
   # The task as the tree holds it now - frozen, and safe to read from any thread
   # : () -> Node
@@ -251,7 +259,7 @@ class TaskProgress
   # : () -> Hash[Symbol, untyped]?
   def error: () -> Hash[Symbol, untyped]?
 
-  # How many it has counted, see `advance!`
+  # How many it has counted, see `advance`
   # : () -> Integer
   def count: () -> Integer
 
@@ -261,7 +269,7 @@ class TaskProgress
 
   # Done, and everything under it ended
   # : () -> bool
-  def done?: () -> bool
+  def complete?: () -> bool
 
   # Ended by `fail!`
   # : () -> bool
@@ -305,7 +313,7 @@ class TaskProgress
   # : (output) -> void
   def remove_output: (output) -> void
 
-  # A child task. `total:` makes it counted (drive it with `advance!`), `indeterminate: true`
+  # A child task. `total:` makes it counted (drive it with `advance`), `indeterminate: true`
   # one with no measure of its own, and `weight:` how much of the parent it is. With a block
   # it runs the block as the child's work, see `run`, and returns the block's value.
   #
@@ -321,21 +329,22 @@ class TaskProgress
 
   # Runs the block as this task's work: done when it returns, failed with the error when it
   # raises - an Interrupt or a SignalException included - and the error raised on. A task
-  # canceled ends its work quietly: `run` returns nil
+  # canceled ends its work quietly: `run` returns nil. One canceled before it began does not
+  # begin
   # : [T] () { (TaskProgress) -> T } -> T?
   def run: [T] () { (TaskProgress) -> T } -> T?
 
   # Moves the percent; 100 finishes the task
-  # : (percent: Integer | Float, ?message: String?) -> self
-  def update_to: (percent: Integer | Float, ?message: String?) -> self
+  # : (Integer | Float, ?message: String?) -> self
+  def update: (Integer | Float, ?message: String?) -> self
 
   # Adds to the count - finishing the task, if that reaches its total
   # : (?Integer, ?message: String?) -> self
-  def advance!: (?Integer, ?message: String?) -> self
+  def advance: (?Integer, ?message: String?) -> self
 
-  # Adds one to the count, see `advance!`
+  # Adds one to the count, see `advance`
   # : (?message: String?) -> self
-  def tick!: (?message: String?) -> self
+  def tick: (?message: String?) -> self
 
   # Goes through a collection a step per item. Given a name it opens a subtask for it, and
   # otherwise counts on this task. The total comes from `size`, never `count` - so a lazy
@@ -372,8 +381,8 @@ class TaskProgress
   # : (?String?) -> self
   def done!: (?String?) -> self
 
-  # Fails the task with an exception, a message, or nothing. `extra` goes along with the
-  # error, booleans and integers only - a reader drops the rest
+  # Fails the task with an exception, a message, or nothing. `extra` goes along with the error:
+  # up to 8 of them, each true, false or an Integer, which is all a reader takes
   #
   # What is still open under it is canceled: it did not fail, it was cut short
   # : (?(Exception | String)?, **bool | Integer) -> self
@@ -442,7 +451,7 @@ class TaskProgress
   # is the IO's size unless given; with neither, the task counts bytes with no measure. With a
   # block, the block runs with the wrapped IO as this task's work, see `run`. Needs the
   # progressive_io gem, and an IO that can tell its position - for a pipe or a socket, call
-  # `advance!` with each chunk instead
+  # `advance` with each chunk instead
   # : (untyped, ?total: Integer?, ?step: Integer?) -> TrackedIO
   # : [T] (untyped, ?total: Integer?, ?step: Integer?) { (TrackedIO) -> T } -> T?
   def track_io: (untyped, ?total: Integer?, ?step: Integer?) -> TrackedIO

@@ -7,35 +7,53 @@ class TaskProgress
   # however fast the tree changes; a reconnect starts with the whole tree, so nothing is ever
   # missed for good. Given a subtask, it streams that branch alone.
   #
-  #   [200, TaskProgress::TurboSSE::HEADERS, TaskProgress::TurboSSE.new(task, renderer:)]
+  #   TaskProgress::TurboSSE.response(task, renderer:, source: "progress-source")
   #
   # Once the task finishes it sends the last frame, removes the element with the id `source` -
-  # the `<turbo-stream-source>`, so the browser does not reconnect to a finished stream - and ends
+  # the `<turbo-stream-source>`, so the browser does not reconnect to a finished stream - and ends.
+  # Without a `source` the browser reconnects every `reconnect` seconds, and gets the last frame
+  # each time. Given a key, it follows the tree handed off there, as SSE does
   class TurboSSE
     # What a Turbo SSE response is sent with - the same as an SSE one
     HEADERS: Hash[String, String]
 
-    @task: TaskProgress
+    @close: bool
 
-    @renderer: TurboStreamOutput::_Renderer
+    @reconnect: Integer | Float
 
-    @interval: Integer | Float
+    @source: String?
 
     @heartbeat: Integer | Float
 
-    @source: String?
+    @interval: Integer | Float
+
+    @renderer: TurboStreamOutput::_Renderer
+
+    @task: TaskProgress
+
+    # A whole Rack response: status, headers and this body - or a 404, for a key with nothing at it
+    # : (TaskProgress | String, **untyped) -> [Integer, Hash[String, String], TurboSSE | Array[String]]
+    def self.response: (TaskProgress | String, **untyped) -> [ Integer, Hash[String, String], TurboSSE | Array[String] ]
 
     # Streams `task`, drawn by `renderer` - an HTMLRenderer, or anything that answers `id` and
     # `render(snapshot, from)`, `from` being the task's path. `source` is the id of the
     # `<turbo-stream-source>` to remove at the end
-    # : (TaskProgress, renderer: TurboStreamOutput::_Renderer, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?source: String?) -> void
-    def initialize: (TaskProgress, renderer: TurboStreamOutput::_Renderer, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?source: String?) -> void
+    # : (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
+    def initialize: (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
 
     # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
     # : () { (String) -> void } -> void
     def each: () { (String) -> void } -> void
 
+    # Stops following a tree it followed by its key - Rack calls it when the response is over
+    # : () -> void
+    def close: () -> void
+
     private
+
+    # Finished, or pruned away - which is as finished as it will ever be
+    # : () -> bool
+    def ended?: () -> bool
 
     # : () -> String
     def frame: () -> String
@@ -43,7 +61,8 @@ class TaskProgress
     # : (State) -> String
     def render: (State) -> String
 
-    # An unnamed event - what `<turbo-stream-source>` listens for
+    # An unnamed event - what `<turbo-stream-source>` listens for. A line of SSE ends at a CR as
+    # much as at a LF, and task names and messages - curl's and ffmpeg's, say - are full of CRs
     # : (String) -> String
     def message: (String) -> String
   end

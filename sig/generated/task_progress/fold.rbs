@@ -1,7 +1,7 @@
 # Generated from lib/task_progress/fold.rb with RBS::Inline
 
 class TaskProgress
-  # :nodoc:
+  # Siblings drawn as one row, see below
   class Fold < Data
     attr_reader status(): Symbol
 

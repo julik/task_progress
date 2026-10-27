@@ -1,10 +1,10 @@
-# Generated from lib/task_progress/memory_store.rb with RBS::Inline
+# Generated from lib/task_progress/memory_cache.rb with RBS::Inline
 
 class TaskProgress
   # A store kept in this process, for where `Rails.cache` is not to hand - tests, a Rack app that
   # runs its jobs in-process. Anything with `read`, `write` and `delete` will do as a store; this
   # is the smallest one, and is safe to share between threads
-  class MemoryStore
+  class MemoryCache
     @entries: Hash[String, untyped]
 
     @lock: Thread::Mutex

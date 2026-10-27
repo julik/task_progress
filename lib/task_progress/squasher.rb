@@ -7,7 +7,7 @@ class TaskProgress
   # reader that had the tree up to the run's `prev` exactly where the run left it, times
   # and all, without replaying the steps in between. What was said is not in the tree, so
   # it goes along after the puts
-  class Squasher
+  class Squasher # :nodoc:
     # @rbs @state: State
 
     # Starts from an empty tree
@@ -30,8 +30,17 @@ class TaskProgress
           touched.clear
           prev = 0
         end
+        journal = Journal.new
+        begin
+          batch.events.each { @state.apply(it, at: batch.at, journal:) }
+        rescue ArgumentError
+          # A batch that does not fit the tree it knows - it joined late, say - leaves that tree as
+          # it was. One alone goes on as it is, for whoever reads it to judge
+          @state.rollback(journal)
+          raise if batches.length > 1
+          return batch
+        end
         batch.events.each do |event|
-          @state.apply(event, at: batch.at)
           prunes << event if event.op == :prune
           next says << event if event.op == :say
           # set, add, note, done and fail start every node above theirs
@@ -41,7 +50,10 @@ class TaskProgress
       return first if batches.length == 1
       last = batches.last or raise ArgumentError, "Nothing to squash"
       puts = @state.each.filter_map { |path, node| Event.new(path:, op: :put, value: node.to_h) if touched[path] }
-      Batch.new(log: last.log, prev:, seq: last.seq, at: last.at, events: [*prunes, *puts, *says].freeze)
+      # The lines go after the puts, which bring their tasks back - but not for a task pruned
+      # since, which nothing after the prune would know
+      said = says.select { @state.key?(it.path) }
+      Batch.new(log: last.log, prev:, seq: last.seq, at: last.at, events: [*prunes, *puts, *said].freeze)
     end
   end
 end

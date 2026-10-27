@@ -17,8 +17,8 @@ class CrossProcessTest < Minitest::Test
     mount = local.mount("Engine")
     status = spawn_child(mount, <<~RUBY)
       TaskProgress.cli("child") do |root|
-        root.subtask("Unpack", total: 3) { |t| 3.times { t.tick!(message: "entry \#{it}") } }
-        root.subtask("Embed") { |t| t.update_to(percent: 50, message: "half") }
+        root.subtask("Unpack", total: 3) { |t| 3.times { t.tick(message: "entry \#{it}") } }
+        root.subtask("Embed") { |t| t.update(50, message: "half") }
       end
     RUBY
 
@@ -26,8 +26,8 @@ class CrossProcessTest < Minitest::Test
     assert_equal :done, mount.task.status
     assert_equal [["Unpack", :done, 3], ["Embed", :done, 0]], mount.task.subtasks.map { [it.name, it.status, it.count] }
     assert_equal "half", mount.task.subtasks.last.message
-    assert mount.task.done?, "the child finished its root, so the mount is done"
-    refute local.done?, "local itself was never finished"
+    assert mount.task.complete?, "the child finished its root, so the mount is done"
+    refute local.complete?, "local itself was never finished"
   end
 
   def test_a_child_failure_crosses_with_its_error

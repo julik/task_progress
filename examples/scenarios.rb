@@ -43,7 +43,7 @@ module Scenarios
     background(TaskProgress.new("Crunch", cancelable: true)) do |root|
       workers = 16.times.map { root.subtask("worker #{it + 1}", total: 300, cancelable: true) }
       workers.map do |worker|
-        Thread.new { worker.run { 300.times { |i| worker.tick!(message: "item #{i + 1}") && nap.call(rand(0.002..0.02)) } } }
+        Thread.new { worker.run { 300.times { |i| worker.tick(message: "item #{i + 1}") && nap.call(rand(0.002..0.02)) } } }
       end.each(&:join)
     end
   end
@@ -57,7 +57,7 @@ module Scenarios
       8.times.map do
         Thread.new do
           while (task = queue.pop)
-            task.run { task.total.times { task.tick! && nap.call(0.02) } }
+            task.run { task.total.times { task.tick && nap.call(0.02) } }
           end
         end
       end.each(&:join)
@@ -68,7 +68,7 @@ module Scenarios
     nap = napper(speed)
     build = lambda do |task, depth|
       if depth == 6
-        task.run { 5.times { task.tick! && nap.call(0.04) } }
+        task.run { 5.times { task.tick && nap.call(0.04) } }
       else
         children = rand(1..2).times.map { task.subtask("level #{depth + 1}.#{it + 1}", **((depth == 5) ? {total: 5} : {})) }
         task.run { children.each { build.call(it, depth + 1) } }
@@ -91,11 +91,11 @@ module Scenarios
     nap = napper(speed)
     background(TaskProgress.new("Relay race")) do |root|
       legs = 8.times.map { root.subtask("leg #{it + 1}", total: 10) }
-      root.transaction { legs.first.advance!(0) }
+      root.transaction { legs.first.advance(0) }
       legs.each_with_index do |leg, i|
-        9.times { leg.tick! && nap.call(0.05) }
+        9.times { leg.tick && nap.call(0.05) }
         root.transaction do
-          leg.tick!
+          leg.tick
           leg.done!("handed over")
           legs[i + 1]&.note("taking over")
         end
@@ -113,9 +113,9 @@ module Scenarios
     background(served) do
       source.run do
         workers = 6.times.map { source.subtask("worker #{it + 1}", total: 60) }
-        workers.map { |w| Thread.new { w.run { 60.times { w.tick! && nap.call(rand(0.01..0.05)) } } } }.each(&:join)
+        workers.map { |w| Thread.new { w.run { 60.times { w.tick && nap.call(rand(0.01..0.05)) } } } }.each(&:join)
       end
-      nap.call(0.6) until mount.finished?
+      nap.call(0.6) until mount.task.finished?
     ensure
       buffered.close
     end
@@ -140,10 +140,10 @@ module Scenarios
       end
       source.run do
         tasks = 3.times.map { source.subtask("stream #{it + 1}", total: 40) }
-        40.times { tasks.each(&:tick!) && nap.call(0.05) }
+        40.times { tasks.each(&:tick) && nap.call(0.05) }
         tasks.each(&:done!)
       end
-      nap.call(0.3) until mount.finished?
+      nap.call(0.3) until mount.task.finished?
       queue.close
       feeder.join
     end
@@ -180,11 +180,11 @@ module Scenarios
           }
         }
       else
-        root = TaskProgress.adopt(job.key, stream:, beat: 0.25)
+        root = TaskProgress.adopt(job.key, stream:, heartbeat: 0.25)
         thread = Thread.new do
           root.run do
             images = root.subtask("Thumbnails", total: 40, cancelable: true)
-            40.times { |i| images.tick!(message: "image-#{format("%02d", i + 1)}.jpg") && nap.call(0.1) }
+            40.times { |i| images.tick(message: "image-#{format("%02d", i + 1)}.jpg") && nap.call(0.1) }
           end
         rescue Exception # rubocop:disable Lint/RescueException
           nil
@@ -194,13 +194,13 @@ module Scenarios
     end
     background(served) do
       kill = worker.call
-      nap.call(0.05) until mount.task.subtasks.first&.count.to_i >= 15 || mount.finished?
+      nap.call(0.05) until mount.task.subtasks.first&.count.to_i >= 15 || mount.task.finished?
       kill.call
-      sleep(0.05) until mount.finished?
-      next if mount.task.done? # the worker outran the kill
+      sleep(0.05) until mount.task.finished?
+      next if mount.task.complete? # the worker outran the kill
       nap.call(1.0)
       worker.call
-      sleep(0.05) until mount.task.done? || mount.task.canceled?
+      sleep(0.05) until mount.task.complete? || mount.task.canceled?
     ensure
       served.log.close
     end
@@ -217,7 +217,7 @@ module Scenarios
           Ractor.new(port, n, speed) do |port, n, speed|
             root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::RactorOutput.new(port)])
             root.run do
-              root.subtask("Crunch", total: 40) { |t| 40.times { t.tick! && sleep(rand(0.01..0.06) / speed) } }
+              root.subtask("Crunch", total: 40) { |t| 40.times { t.tick && sleep(rand(0.01..0.06) / speed) } }
             end
             port.send(:finished)
           end

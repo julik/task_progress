@@ -16,23 +16,23 @@ N = 200_000
 
 root = TaskProgress.new("bench")
 task = root.subtask("ticks", total: N)
-measure("tick!, no outputs", N) { N.times { task.tick! } }
+measure("tick, no outputs", N) { N.times { task.tick } }
 
 root = TaskProgress.new("bench", outputs: [TaskProgress::BufferedOutput.new(->(_, _) {})])
 task = root.subtask("ticks", total: N)
-measure("tick!, through a BufferedOutput", N) { N.times { task.tick! } }
+measure("tick, through a BufferedOutput", N) { N.times { task.tick } }
 
 stream = TaskProgress::MemoryStream.new
 import = TaskProgress.handoff("bench", stream:)
 adopted = TaskProgress.adopt(import.key, stream:)
 task = adopted.subtask("ticks", total: N)
-measure("tick!, adopted, to a MemoryStream", N) { N.times { task.tick! } }
+measure("tick, adopted, to a MemoryStream", N) { N.times { task.tick } }
 adopted.log.close
 puts format("%-52s %10d entries left after trimming", "", stream.read(import.key).length)
 
 root = TaskProgress.new("bench")
 tasks = 4.times.map { root.subtask("t#{it}", total: N / 4) }
-measure("tick!, 4 threads on one tree", N) { tasks.map { |t| Thread.new { (N / 4).times { t.tick! } } }.each(&:join) }
+measure("tick, 4 threads on one tree", N) { tasks.map { |t| Thread.new { (N / 4).times { t.tick } } }.each(&:join) }
 
 GC.start
 before = rss_kb

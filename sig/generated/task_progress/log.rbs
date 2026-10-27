@@ -43,7 +43,7 @@ class TaskProgress
 
     @on_cancel: Hash[path, Array[^(String?) -> void]]
 
-    @on_output_error: ^(Exception, untyped) -> void
+    @on_error: ^(Exception, untyped) -> void
 
     @changed: Thread::ConditionVariable
 
@@ -54,14 +54,15 @@ class TaskProgress
     def initialize: (?id: String | Symbol, ?key: String?, ?clock: ^() -> Float, ?random: Random) -> void
 
     # Hears about an output that raised, with the error and the output; it warns by default
-    attr_accessor on_output_error: ^(Exception, untyped) -> void
+    attr_accessor on_error: ^(Exception, untyped) -> void
 
     # Runs the block under the lock, collecting what it adds with `tx.<<`; it commits as one
     # batch, or not at all if the block raises. A transaction opened inside another one on the
     # same fiber joins it. The block holds the lock throughout - keep it short, and never wait
-    # in it on another thread that writes to this log
-    # : [T] () { (Transaction) -> T } -> T
-    def transaction: [T] () { (Transaction) -> T } -> T
+    # in it on another thread that writes to this log. `at` is the time it happens at - now,
+    # unless it relays what happened elsewhere, earlier
+    # : [T] (?at: Float?) { (Transaction) -> T } -> T
+    def transaction: [T] (?at: Float?) { (Transaction) -> T } -> T
 
     # Commits the events as one batch
     # : (*Event) -> void
@@ -73,7 +74,8 @@ class TaskProgress
     # : (?output?, ?replay: bool, ?path: path) ?{ (Batch, Log) -> void } -> output
     def add_output: (?output?, ?replay: bool, ?path: path) ?{ (Batch, Log) -> void } -> output
 
-    # Takes the output as it was given to `add_output`
+    # Takes the output as it was given to `add_output`. It hears nothing more once this returns -
+    # save a batch being delivered to it on another thread just then
     # : (output) -> void
     def remove_output: (output) -> void
 

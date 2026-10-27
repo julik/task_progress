@@ -22,10 +22,9 @@ class TaskProgress
     # The mount node
     attr_reader path: path
 
-    # The seq of the remote's last batch it applied
-    attr_reader last_seq: Integer?
-
     @control: IO?
+
+    @last_seq: Integer?
 
     @control_lock: Thread::Mutex
 
@@ -55,6 +54,10 @@ class TaskProgress
 
     @silent: bool
 
+    @gave_up: bool
+
+    @generation: Integer
+
     # For the node at `path` - see TaskProgress#mount, which opens one. Unless `own`, the
     # remote's root names and weighs the mount node too - for a tree that is nothing but a mount,
     # as TaskProgress.follow makes
@@ -72,12 +75,12 @@ class TaskProgress
     # Takes a Batch, its Hash form, or a line of NDJSON. Returns :applied, :gap, :rejected, or
     # :duplicate for one already applied - redelivery is ordinary after a reconnect or a replay.
     # Following a stream, a batch from a writer another has since replaced is :superseded
-    # : (Batch | Hash[untyped, untyped] | String) -> (:applied | :gap | :rejected | :duplicate | :superseded)
-    def <<: (Batch | Hash[untyped, untyped] | String) -> (:applied | :gap | :rejected | :duplicate | :superseded)
+    # : (Batch | Hash[untyped, untyped] | String) -> Symbol
+    def <<: (Batch | Hash[untyped, untyped] | String) -> Symbol
 
     # Reads NDJSON batches off an IO until EOF
     # : (IO) -> self
-    def follow: (IO) -> self
+    def read: (IO) -> self
 
     # Runs a command with TASK_PROGRESS_FD pointing at a pipe, follows it until it exits, and
     # returns its Process::Status. A child that exits without finishing its root fails the mount.
@@ -111,7 +114,7 @@ class TaskProgress
     # : (?timeout: (Integer | Float)?) -> Integer
     def catch_up: (?timeout: (Integer | Float)?) -> Integer
 
-    # Stops following, see #follow_stream
+    # Stops following, see #follow_stream - closing the log does it
     # : () -> void
     def stop_following: () -> void
 
@@ -121,7 +124,10 @@ class TaskProgress
     # : (path, ?String?) -> (:forwarded | :moot)
     def request_cancel: (path, ?String?) -> (:forwarded | :moot)
 
-    # The parent may still end the subtree - when the remote went away, say
+    private
+
+    # The parent may still end the subtree - when the remote went away, say. From outside, end
+    # the mount's own task: `mount.task.done!`
     # : () -> self
     def done!: () -> self
 
@@ -137,10 +143,12 @@ class TaskProgress
     # : () -> bool
     def finished?: () -> bool
 
-    private
-
     # : (Integer | Float, Integer | Float) -> void
     def watch: (Integer | Float, Integer | Float) -> void
+
+    # Canceling the mount asks the remote to cancel its root - the run there is now, once
+    # : () -> void
+    def arm_cancel: () -> void
 
     # The writer beats again, and nothing went missing meanwhile
     # : () -> void
@@ -157,8 +165,9 @@ class TaskProgress
     # : (Batch | Hash[untyped, untyped] | String) -> Batch?
     def coerce: (Batch | Hash[untyped, untyped] | String) -> Batch?
 
-    # : () -> void
-    def mark_stale: () -> void
+    # In the transaction given, or one of its own
+    # : (?Transaction?) -> void
+    def mark_stale: (?Transaction?) -> void
 
     # The remote's events, moved under the mount - or nil if one would land too deep
     # : (Array[Event], Float) -> Array[Event]?

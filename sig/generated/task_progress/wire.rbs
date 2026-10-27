@@ -91,7 +91,8 @@ class TaskProgress
     # : (untyped) -> Float?
     private def self.time: (untyped) -> Float?
 
-    # Integers and floats only - not a Rational, nor a Complex that has no Float to give
+    # Finite integers and floats only - not a Rational, nor a Complex that has no Float to give,
+    # nor the Infinity that `1e999` parses to, which no JSON could ever be written with again
     # : (untyped) -> Float?
     private def self.number: (untyped) -> Float?
 

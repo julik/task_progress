@@ -28,8 +28,8 @@ class JsParityTest < Minitest::Test
         case rng.rand(8)
         when 0, 1 then live << task.subtask("t", total: [nil, rng.rand(1..9)].sample(random: rng), weight: [nil, rng.rand(1..3)].sample(random: rng),
           expect: [nil, 3].sample(random: rng), indeterminate: rng.rand(6).zero?)
-        when 2 then task.update_to(percent: rng.rand(0..99) + [0, 0.5].sample(random: rng))
-        when 3 then task.advance!(rng.rand(1..3))
+        when 2 then task.update(rng.rand(0..99) + [0, 0.5].sample(random: rng))
+        when 3 then task.advance(rng.rand(1..3))
         when 4 then task.done!
         when 5 then task.fail!("x")
         when 6 then task.note("n")

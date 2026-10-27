@@ -16,15 +16,20 @@ class TaskProgress
   #     status, headers, body = TaskProgress::Poll.response(task, request.env)
   #     render json: body.first, status:, headers:
   #
-  # For a tree another process writes, poll `TaskProgress.fetch(key)`; to long-poll one, give it
-  # `TaskProgress.follow(key)` and `close: true`, which stops following once it has answered
+  # Given a key instead of a task - a tree handed off with TaskProgress.handoff - it reads that
+  # tree from the stream, following it for as long as a long poll waits, and answers 404 for a
+  # key with nothing at it
   module Poll
     # What a poll is answered with
     HEADERS: Hash[String, String]
 
-    # A whole Rack response for the task's tree - its subtree, for a subtask
-    # : (TaskProgress, ?Hash[String, untyped], ?max_wait: Integer | Float, ?close: bool) -> [Integer, Hash[String, String], Array[String]]
-    def self.response: (TaskProgress, ?Hash[String, untyped], ?max_wait: Integer | Float, ?close: bool) -> [ Integer, Hash[String, String], Array[String] ]
+    # A whole Rack response for the task's tree - its subtree, for a subtask - or for the tree
+    # handed off at a key, in `stream`
+    # : (TaskProgress | String, ?Hash[String, untyped], ?stream: untyped, ?max_wait: Integer | Float) -> [Integer, Hash[String, String], Array[String]]
+    def self.response: (TaskProgress | String, ?Hash[String, untyped], ?stream: untyped, ?max_wait: Integer | Float) -> [ Integer, Hash[String, String], Array[String] ]
+
+    # : (TaskProgress, Hash[String, untyped], Float) -> [Integer, Hash[String, String], Array[String]]
+    def self.answer: (TaskProgress, Hash[String, untyped], Float) -> [ Integer, Hash[String, String], Array[String] ]
 
     # Which tree a squash is: the same tree, however many batches it took, gets the same tag. Times
     # are left out - a tree read from a stream has them moved onto this clock, a little differently
@@ -33,6 +38,10 @@ class TaskProgress
     def self.etag: (Batch) -> String
 
     TIMES: Array[Symbol]
+
+    # The tags a client already has. A proxy that compresses the answer makes the tag weak, W/"..."
+    # : (Hash[String, untyped]) -> Array[String]
+    def self.seen: (Hash[String, untyped]) -> Array[String]
 
     # The seconds asked for in `?wait=`, up to `max_wait`
     # : (Hash[String, untyped], Integer | Float) -> Float

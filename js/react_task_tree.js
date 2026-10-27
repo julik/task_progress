@@ -12,21 +12,24 @@ const NO_GRAFTS = []
 // (seconds between polls) or `wait` (seconds to long-poll), see followPollingAt. The tree object
 // stays the same one, so a version counter is what tells React to render again. `grafts` -
 // [{ path, local }] - draws tasks running in this browser under server tasks, see
-// TaskTree#graft; keep the array the same one while it does not change
-export function useTaskTree(url, grafts = NO_GRAFTS, { poll = 0, wait = 0 } = {}) {
+// TaskTree#graft
+export function useTaskTree(url, { poll = 0, wait = 0, grafts = NO_GRAFTS } = {}) {
   const [state, setState] = useState({ tree: null, version: 0 })
   useEffect(() => {
     setState({ tree: null, version: 0 })
     if (!url) return
     const draw = (tree) => setState((s) => ({ tree, version: s.version + 1 }))
-    const following = poll || wait ? followPollingAt(url, draw, { interval: (poll || 1) * 1000, wait }) : followEventSourceAt(url, draw)
+    const following = poll || wait ? followPollingAt(url, draw, { poll: poll || 1, wait }) : followEventSourceAt(url, draw)
     return () => following.close()
   }, [url, poll, wait])
+  // Keyed on what the grafts are, not on the array: one written inline is a new array every
+  // render, and grafting anew draws again - which would render again, every frame, for ever
+  const graftsKey = grafts.map(({ path, local }) => `${path.join("-")}:${local.log}`).join(" ")
   useEffect(() => {
     if (!state.tree) return
     const ungrafts = grafts.map(({ path, local }) => state.tree.graft(path, local))
     return () => ungrafts.forEach((ungraft) => ungraft())
-  }, [state.tree, grafts])
+  }, [state.tree, graftsKey]) // eslint-disable-line react-hooks/exhaustive-deps
   return state.tree
 }
 
@@ -60,7 +63,7 @@ function Row({ row, onCancel, offered }) {
 // `cancelToken`; a task running in this browser is canceled here. For anything else, pass
 // `onCancel(row)` - return false from it to release the button
 export function TaskTreeView({ url, cancelUrl, cancelToken, onCancel, grafts, poll, wait }) {
-  const tree = useTaskTree(url, grafts, { poll, wait })
+  const tree = useTaskTree(url, { poll, wait, grafts })
   if (!tree) return null
   const remote = cancelUrl && (async (row) => {
     try { return (await requestCancel(cancelUrl, row.path, { token: cancelToken })).ok } catch { return false }
@@ -71,8 +74,14 @@ export function TaskTreeView({ url, cancelUrl, cancelToken, onCancel, grafts, po
     .map((row) => html`<${Row} key=${row.key} row=${row} onCancel=${cancel} offered=${!!(onCancel || remote || row.local)} />`)
 }
 
-// For pages that are not React apps: mount into an element, then point it at streams
-export function mountTaskTree(element) {
+// For pages that are not React apps, as React's own createRoot: render it into an element, and
+// render again with other props - another url, `poll` - to change what it follows
+//
+//   createTaskTreeRoot(element).render({ url: "/jobs/42/progress" })
+export function createTaskTreeRoot(element) {
   const root = createRoot(element)
-  return { followEventSourceAt: (url, props = {}) => root.render(html`<${TaskTreeView} url=${url} ...${props} />`) }
+  return {
+    render: (props) => root.render(html`<${TaskTreeView} ...${props} />`),
+    unmount: () => root.unmount()
+  }
 }

@@ -27,9 +27,13 @@ export default class extends Controller {
     if (!url) return
     const draw = (tree, changes) => this.render(tree, changes)
     this.following = this.pollValue || this.waitValue
-      ? followPollingAt(url, draw, { interval: (this.pollValue || 1) * 1000, wait: this.waitValue })
+      ? followPollingAt(url, draw, { poll: this.pollValue || 1, wait: this.waitValue })
       : followEventSourceAt(url, draw)
   }
+
+  // Stimulus does not tell a controller its values again when its element comes back - moved in
+  // the page, or kept across visits with data-turbo-permanent - so it picks up where it was
+  connect() { if (this.urlValue && !this.following) this.urlValueChanged(this.urlValue) }
 
   disconnect() { this.#stop() }
 
@@ -41,6 +45,7 @@ export default class extends Controller {
     for (const ungraft of this.ungrafts ?? []) ungraft()
     this.ungrafts = []
     this.following?.close()
+    this.following = null
   }
 
   render(tree, changes) {

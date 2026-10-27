@@ -130,7 +130,7 @@ class TaskProgress
       def value(op, value)
         case op
         when :open, :meta then attributes(value, stale: op == :meta)
-        when :set then value.is_a?(Numeric) ? value.clamp(0, 100) : :invalid
+        when :set then number(value)&.clamp(0, 100) || :invalid
         when :add then value.is_a?(Integer) ? value.clamp(-MAX_COUNT, MAX_COUNT) : :invalid
         when :note then text(value)
         when :say then text(value) || :invalid
@@ -185,9 +185,13 @@ class TaskProgress
       #: (untyped) -> Float?
       def time(value) = number(value)
 
-      # Integers and floats only - not a Rational, nor a Complex that has no Float to give
+      # Finite integers and floats only - not a Rational, nor a Complex that has no Float to give,
+      # nor the Infinity that `1e999` parses to, which no JSON could ever be written with again
       #: (untyped) -> Float?
-      def number(value) = (value.to_f if value.is_a?(Integer) || value.is_a?(Float))
+      def number(value)
+        return unless value.is_a?(Integer) || value.is_a?(Float)
+        value.to_f.then { it if it.finite? }
+      end
 
       #: (Hash[untyped, untyped], ?Integer) -> Hash[Symbol, untyped]
       def error(data, depth = 0)
