@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    # A wedged Ractor or a stream that never ends should fail the run, not hold it for hours
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 4.0 runs the Ractor tests, which 3.4 skips - Ractors crash its VM
+        ruby: ["3.4", "4.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      # For the browser client's tests, which hold it to the Ruby side
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: bundle exec rake test
