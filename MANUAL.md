@@ -313,7 +313,18 @@ end
 
 For a wait nothing can interrupt, raise into the thread: `me = Thread.current; t.on_cancel { me.raise(TaskProgress::Canceled.new(t)) }`.
 
-**Do not swallow it.** Code that rescues `Exception` should re-raise `TaskProgress::Canceled`.
+**Once you have caught it, stop.** The exception is the cancel: canceling only marks the task, and `Canceled` unwinding the work out of its loop is what actually stops it. Swallow it and carry on, and the work runs to the end while every reader of the tree is told it was canceled - a catch-all `rescue Exception` around each row imports all 100 rows of a task canceled at the 22nd. A `rescue Exception => e; retry` wrapper is worse: it retries into the canceled task, and spins.
+
+Re-raising is the simplest way to stop, since `run` then ends the task. Breaking out, or returning from the block, does as well - which makes room to finish the step at hand first:
+
+```ruby
+rows.each do |row|
+  import(row)
+  rows.tick!
+rescue TaskProgress::Canceled
+  break  # this row is whole - stop before the next one
+end
+```
 
 **Threads and child processes follow.** Workers on threads of their own each stop at their next tick. A child process gets the request over its control pipe, and the same patterns apply inside it. A child too stuck to notice is sent TERM after the mount's `grace`, which Ruby raises inside the work like any other exception.
 
