@@ -2,8 +2,8 @@
 
 class TaskProgress
   # A stream store kept in this process - a stream per tree, each under its own key: what
-  # TaskProgress.stream_store is until told otherwise, and what
-  # the tests and the bench run on. It does what RedisStreamStore does - append-only entries under a
+  # TaskProgress.stream_store is until told otherwise, and what the tests and the bench run on.
+  # It does what RedisStreamStore does - append-only entries under a
   # key, read from an id on and waited for, trimmed from the front, plus plain values that
   # expire - so a tree handed off here behaves as one handed off through Redis, as long as the
   # job runs in the same process.
