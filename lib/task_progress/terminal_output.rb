@@ -156,7 +156,7 @@ class TaskProgress
       parts << pace(node) if node.status == :active && node.children.empty?
       parts << elapsed(node)
       parts << "attempt #{node.attempt}" if node.attempt.to_i > 1
-      parts << (node.status == :failed ? node.error&.dig(:message) : node.message)
+      parts << ((node.status == :failed) ? node.error&.dig(:message) : node.message)
       parts.compact.reject(&:empty?).join("  ")[0, width - 1].to_s
     end
 
@@ -176,7 +176,9 @@ class TaskProgress
       return nil if node.status == :done && path.length.positive?
       percent = snapshot.percent(path)
       if node.children.empty? && node.indeterminate
-        (node.unit == "bytes") ? TaskProgress.human_bytes(node.count) : node.count.to_s if node.count.positive?
+        if node.count.positive?
+          (node.unit == "bytes") ? TaskProgress.human_bytes(node.count) : node.count.to_s
+        end
       elsif node.children.empty? && (total = node.total)
         count = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(node.count)} / #{TaskProgress.human_bytes(total)}" : "#{node.count}/#{total}"
         "#{bar(percent)} #{count}"
@@ -199,7 +201,11 @@ class TaskProgress
       seconds = @clock.call - started
       return nil unless seconds >= 1 && node.count.positive?
       rate = node.count / seconds
-      per = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(rate)}/s" : format((rate < 10) ? "%.1f/s" : "%d/s", rate)
+      per = if node.unit == "bytes"
+        "#{TaskProgress.human_bytes(rate)}/s"
+      else
+        format((rate < 10) ? "%.1f/s" : "%d/s", rate)
+      end
       total = node.total
       return per unless total && total > node.count
       "#{per}  ETA #{TaskProgress.duration((total - node.count) / rate)}"

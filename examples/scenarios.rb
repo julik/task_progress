@@ -43,7 +43,7 @@ module Scenarios
     background(TaskProgress.new("Crunch", cancelable: true)) do |root|
       workers = 16.times.map { root.subtask("worker #{it + 1}", total: 300, cancelable: true) }
       workers.map do |worker|
-        Thread.new { worker.run { 300.times { |i| worker.tick!(message: "item #{i + 1}") && nap.(rand(0.002..0.02)) } } }
+        Thread.new { worker.run { 300.times { |i| worker.tick!(message: "item #{i + 1}") && nap.call(rand(0.002..0.02)) } } }
       end.each(&:join)
     end
   end
@@ -57,7 +57,7 @@ module Scenarios
       8.times.map do
         Thread.new do
           while (task = queue.pop)
-            task.run { task.total.times { task.tick! && nap.(0.02) } }
+            task.run { task.total.times { task.tick! && nap.call(0.02) } }
           end
         end
       end.each(&:join)
@@ -68,13 +68,13 @@ module Scenarios
     nap = napper(speed)
     build = lambda do |task, depth|
       if depth == 6
-        task.run { 5.times { task.tick! && nap.(0.04) } }
+        task.run { 5.times { task.tick! && nap.call(0.04) } }
       else
-        children = rand(1..2).times.map { task.subtask("level #{depth + 1}.#{it + 1}", **(depth == 5 ? {total: 5} : {})) }
-        task.run { children.each { build.(it, depth + 1) } }
+        children = rand(1..2).times.map { task.subtask("level #{depth + 1}.#{it + 1}", **((depth == 5) ? {total: 5} : {})) }
+        task.run { children.each { build.call(it, depth + 1) } }
       end
     end
-    background(TaskProgress.new("Deep")) { |root| root.subtask("level 1") { build.(it, 1) } }
+    background(TaskProgress.new("Deep")) { |root| root.subtask("level 1") { build.call(it, 1) } }
   end
 
   define "waiting", "Nothing to count", "Only indeterminate tasks: spinners, elapsed time and the latest note. A task with no measure counts for nothing until it is done." do |speed:|
@@ -82,7 +82,7 @@ module Scenarios
     background(TaskProgress.new("Waiting game")) do |root|
       steps = ["Polling the API", "Waiting for a lock", "Asking nicely"].map { root.subtask(it, indeterminate: true) }
       steps.map do |step|
-        Thread.new { step.run { rand(3..6).times { |i| step.note("attempt #{i + 1}") && nap.(rand(0.3..0.8)) } } }
+        Thread.new { step.run { rand(3..6).times { |i| step.note("attempt #{i + 1}") && nap.call(rand(0.3..0.8)) } } }
       end.each(&:join)
     end
   end
@@ -93,7 +93,7 @@ module Scenarios
       legs = 8.times.map { root.subtask("leg #{it + 1}", total: 10) }
       root.transaction { legs.first.advance!(0) }
       legs.each_with_index do |leg, i|
-        9.times { leg.tick! && nap.(0.05) }
+        9.times { leg.tick! && nap.call(0.05) }
         root.transaction do
           leg.tick!
           leg.done!("handed over")
@@ -113,9 +113,9 @@ module Scenarios
     background(served) do
       source.run do
         workers = 6.times.map { source.subtask("worker #{it + 1}", total: 60) }
-        workers.map { |w| Thread.new { w.run { 60.times { w.tick! && nap.(rand(0.01..0.05)) } } } }.each(&:join)
+        workers.map { |w| Thread.new { w.run { 60.times { w.tick! && nap.call(rand(0.01..0.05)) } } } }.each(&:join)
       end
-      nap.(0.6) until mount.finished?
+      nap.call(0.6) until mount.finished?
     ensure
       buffered.close
     end
@@ -133,17 +133,17 @@ module Scenarios
           next if batch.seq == 25 # lost on the way
           mount << batch
           if mount.stale?
-            nap.(2.0)
+            nap.call(2.0)
             mount << source.log.squashed
           end
         end
       end
       source.run do
         tasks = 3.times.map { source.subtask("stream #{it + 1}", total: 40) }
-        40.times { tasks.each(&:tick!) && nap.(0.05) }
+        40.times { tasks.each(&:tick!) && nap.call(0.05) }
         tasks.each(&:done!)
       end
-      nap.(0.3) until mount.finished?
+      nap.call(0.3) until mount.finished?
       queue.close
       feeder.join
     end
@@ -170,13 +170,21 @@ module Scenarios
     worker = lambda do
       if redis
         pid = Process.spawn(RbConfig.ruby, File.expand_path("stream_worker.rb", __dir__), job.key, "--speed", speed.to_s)
-        -> { Process.kill(:KILL, pid) && Process.wait(pid) }.tap { |kill| at_exit { kill.call rescue nil } }
+        -> { Process.kill(:KILL, pid) && Process.wait(pid) }.tap { |kill|
+          at_exit {
+            begin
+              kill.call
+            rescue
+              nil
+            end
+          }
+        }
       else
         root = TaskProgress.adopt(job.key, stream:, beat: 0.25)
         thread = Thread.new do
           root.run do
             images = root.subtask("Thumbnails", total: 40, cancelable: true)
-            40.times { |i| images.tick!(message: "image-#{format("%02d", i + 1)}.jpg") && nap.(0.1) }
+            40.times { |i| images.tick!(message: "image-#{format("%02d", i + 1)}.jpg") && nap.call(0.1) }
           end
         rescue Exception # rubocop:disable Lint/RescueException
           nil
@@ -186,11 +194,11 @@ module Scenarios
     end
     background(served) do
       kill = worker.call
-      nap.(0.05) until mount.task.subtasks.first&.count.to_i >= 15 || mount.finished?
+      nap.call(0.05) until mount.task.subtasks.first&.count.to_i >= 15 || mount.finished?
       kill.call
       sleep(0.05) until mount.finished?
       next if mount.task.done? # the worker outran the kill
-      nap.(1.0)
+      nap.call(1.0)
       worker.call
       sleep(0.05) until mount.task.done? || mount.task.canceled?
     ensure
@@ -198,31 +206,31 @@ module Scenarios
     end
   end
 
-if TaskProgress::RACTORS
-  define "ractors", "Ractors", "Four Ractors each build a tree of their own and send their batches out through a Ractor::Port as frozen copies; each is mounted here. Ruby 4.0 and up." do |speed:|
-    Warning[:experimental] = false
-    served = TaskProgress.new("Ractor pool")
-    mounts = 4.times.map { served.mount("ractor #{it + 1}") }
-    background(served) do
-      port = Ractor::Port.new
-      ractors = mounts.each_index.map do |n|
-        Ractor.new(port, n, speed) do |port, n, speed|
-          root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::RactorOutput.new(port)])
-          root.run do
-            root.subtask("Crunch", total: 40) { |t| 40.times { t.tick! && sleep(rand(0.01..0.06) / speed) } }
+  if TaskProgress::RACTORS
+    define "ractors", "Ractors", "Four Ractors each build a tree of their own and send their batches out through a Ractor::Port as frozen copies; each is mounted here. Ruby 4.0 and up." do |speed:|
+      Warning[:experimental] = false
+      served = TaskProgress.new("Ractor pool")
+      mounts = 4.times.map { served.mount("ractor #{it + 1}") }
+      background(served) do
+        port = Ractor::Port.new
+        ractors = mounts.each_index.map do |n|
+          Ractor.new(port, n, speed) do |port, n, speed|
+            root = TaskProgress.new("worker #{n}", outputs: [TaskProgress::RactorOutput.new(port)])
+            root.run do
+              root.subtask("Crunch", total: 40) { |t| 40.times { t.tick! && sleep(rand(0.01..0.06) / speed) } }
+            end
+            port.send(:finished)
           end
-          port.send(:finished)
         end
+        by_log = {}
+        finished = 0
+        while finished < ractors.length
+          message = port.receive
+          next finished += 1 if message == :finished
+          (by_log[message.log] ||= mounts[by_log.size]) << message
+        end
+        ractors.each(&:join)
       end
-      by_log = {}
-      finished = 0
-      while finished < ractors.length
-        message = port.receive
-        next finished += 1 if message == :finished
-        (by_log[message.log] ||= mounts[by_log.size]) << message
-      end
-      ractors.each(&:join)
     end
   end
-end
 end

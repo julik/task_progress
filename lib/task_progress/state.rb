@@ -123,7 +123,8 @@ class TaskProgress
         node.stale = value[:stale] if value.key?(:stale)
       when :set
         node = updatable!(path, node)
-        raise ArgumentError, "Percent must be between 0 and 100 inclusive, got #{value.inspect}" unless (value.is_a?(Integer) || value.is_a?(Float)) && (0..100).cover?(value)
+        valid = (value.is_a?(Integer) || value.is_a?(Float)) && (0..100).cover?(value)
+        raise ArgumentError, "Percent must be between 0 and 100 inclusive, got #{value.inspect}" unless valid
         start(path, at, journal)
         node.percent = value
       when :add
@@ -150,7 +151,7 @@ class TaskProgress
           journal&.touch(sub, subnode)
           @nodes.delete(sub)
         end
-        node.children = []
+        node.children = [] #: Array[String]
       when :say
         existing!(path, node)
       when :put
@@ -262,7 +263,7 @@ class TaskProgress
 
     # The nodes themselves, for an earlier snapshot to lend a new one what has not changed
     #: () -> Hash[path, Node]
-    def nodes = @nodes
+    attr_reader :nodes #: Hash[path, Node]
 
     private
 

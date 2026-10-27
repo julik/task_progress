@@ -1,0 +1,6 @@
+# The oldest Ruby the gem supports - no syntax or cop newer than that
+ruby_version: 3.4
+ignore:
+  - "sig/**/*"
+  - "doc/**/*"
+  - "vendor/**/*"

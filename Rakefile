@@ -1,4 +1,5 @@
 require "rake/testtask"
+require "standard/rake"
 
 Rake::TestTask.new(:test) do |t|
   t.libs << "test"
@@ -6,7 +7,7 @@ Rake::TestTask.new(:test) do |t|
   t.warning = false
 end
 
-task default: :test
+task default: %i[test standard]
 
 desc "Write the inline RBS types out to sig/generated"
 task :rbs do

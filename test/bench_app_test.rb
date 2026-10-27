@@ -84,8 +84,12 @@ class BenchAppTest < Minitest::Test
   end
 
   def cancellation(job, path, token: job["cancel_token"])
-    response = @request.post(job["cancellations"], "CONTENT_TYPE" => "application/json", input: JSON.generate(path:, token:))
-    [response.status, (JSON.parse(response.body) rescue nil), response.headers["location"]]
+    response = @request.post(job["cancellations"], "CONTENT_TYPE" => "application/json", :input => JSON.generate(path:, token:))
+    [response.status, begin
+      JSON.parse(response.body)
+    rescue
+      nil
+    end, response.headers["location"]]
   end
 
   def test_a_cancellation_is_created_for_a_cancelable_task

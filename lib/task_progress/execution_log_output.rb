@@ -137,7 +137,11 @@ class TaskProgress
     def ending_put(event)
       op = PUT_ENDINGS[event.value[:status]] if event.op == :put
       return unless op && !@ended.include?(event.path)
-      Event.new(path: event.path, op:, value: (op == :fail) ? event.value[:error] : ((op == :cancel) ? event.value[:message] : nil))
+      Event.new(path: event.path, op:, value: if op == :fail
+                                                event.value[:error]
+                                              else
+                                                ((op == :cancel) ? event.value[:message] : nil)
+                                              end)
     end
 
     #: (State, Event) -> String

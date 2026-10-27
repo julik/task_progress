@@ -9,6 +9,8 @@
 
 ## Ruby
 
+`bundle exec standardrb --fix` after every change; a change is not done until `bundle exec standardrb` passes - `bundle exec rake` runs it with the tests, and CI runs it too. Standard is locked to one version in the Gemfile and told `ruby_version: 3.4` in `.standard.yml`, so the style is the one Ruby 3.4 allows, whichever Ruby runs it. A cop that is wrong for one line gets a `# rubocop:disable Cop/Name -- why` on that line, never a rule switched off for everyone.
+
 - Ruby 3.4 and up. Ractor code runs on 4.0 only - keep it behind `TaskProgress::RACTORS`, and run the tests on both.
 - No runtime dependencies. `progressive_io` is optional and loaded on first use; Puma, rackup and Assiette are for the bench only.
 - Comments are few, and say why rather than what. A spaced hyphen ` - `, never an em-dash.

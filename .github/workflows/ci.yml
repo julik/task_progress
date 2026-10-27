@@ -33,6 +33,8 @@ jobs:
         with:
           node-version: "22"
       - run: bundle exec rake test
+      - name: Style
+        run: bundle exec standardrb
       # The types live next to the code; sig/generated is written from them and committed, so it
       # must come out the same here as it was committed
       - name: Types

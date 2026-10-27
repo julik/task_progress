@@ -33,7 +33,10 @@ module StreamBehaviour
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     assert_equal [], @stream.read(key, after: ids[2], timeout: 0.1)
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :>=, 0.09, "waited for one"
-    Thread.new { sleep 0.05; @stream.append(key, "d") }
+    Thread.new {
+      sleep 0.05
+      @stream.append(key, "d")
+    }
     assert_equal ["d"], @stream.read(key, after: ids[2], timeout: 2).map(&:last), "and woke when one came"
   ensure
     @stream.delete(key)
@@ -180,7 +183,10 @@ module StreamBehaviour
     status, = TaskProgress::Poll.response(root, {"HTTP_IF_NONE_MATCH" => headers["etag"]})
     assert_equal 304, status
 
-    Thread.new { sleep 0.1; root.subtask("News") }
+    Thread.new {
+      sleep 0.1
+      root.subtask("News")
+    }
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     status, = TaskProgress::Poll.response(root, {"HTTP_IF_NONE_MATCH" => headers["etag"], "QUERY_STRING" => "wait=5"})
     assert_equal 200, status, "held until there was news"
@@ -233,7 +239,10 @@ class RedisStreamTest < Minitest::Test
     key = "tp-test:#{rand(36**8).to_s(36)}"
     id = stream.append(key, "a")
     # A redis-rb client is one connection, which a waiting read holds - so the writer gets another
-    Thread.new { sleep 0.05; @stream.append(key, "b") }
+    Thread.new {
+      sleep 0.05
+      @stream.append(key, "b")
+    }
     assert_equal ["b"], stream.read(key, after: id, timeout: 2).map(&:last)
   rescue LoadError
     skip "redis-rb is not installed"

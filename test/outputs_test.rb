@@ -78,7 +78,10 @@ class OutputsTest < Minitest::Test
   def test_buffered_merges_what_piles_up_and_keeps_the_chain
     received = []
     gate = Queue.new
-    slow = ->(batch, _) { gate.pop; received << batch }
+    slow = ->(batch, _) {
+      gate.pop
+      received << batch
+    }
     buffered = TaskProgress::BufferedOutput.new(slow, interval: 0)
     root = TaskProgress.new("demo", outputs: [buffered])
     a = root.subtask("A")
@@ -91,31 +94,31 @@ class OutputsTest < Minitest::Test
     assert_equal root.log.snapshot.to_h, fold_batches(received).to_h
   end
 
-def test_a_squashed_run_lands_a_reader_exactly_where_the_run_left_off
-  20.times do |seed|
-    rng = Random.new(seed)
-    batches, output = recording
-    root = TaskProgress.new("demo", outputs: [output], log: ticking_log)
-    live = [root]
-    200.times do
-      task = live.sample(random: rng)
-      case rng.rand(5)
-      when 0 then live << task.subtask("t")
-      when 1 then task.update_to(percent: rng.rand(99))
-      when 2 then task.done!
-      when 3 then root.log.append(TaskProgress::Event.new(path: task.path, op: :prune)) && live.select! { root.log.snapshot.key?(it.path) }
-      when 4 then task.note("n")
+  def test_a_squashed_run_lands_a_reader_exactly_where_the_run_left_off
+    20.times do |seed|
+      rng = Random.new(seed)
+      batches, output = recording
+      root = TaskProgress.new("demo", outputs: [output], log: ticking_log)
+      live = [root]
+      200.times do
+        task = live.sample(random: rng)
+        case rng.rand(5)
+        when 0 then live << task.subtask("t")
+        when 1 then task.update_to(percent: rng.rand(99))
+        when 2 then task.done!
+        when 3 then root.log.append(TaskProgress::Event.new(path: task.path, op: :prune)) && live.select! { root.log.snapshot.key?(it.path) }
+        when 4 then task.note("n")
+        end
+      rescue ArgumentError
+        nil
       end
-    rescue ArgumentError
-      nil
+      squasher = TaskProgress::Squasher.new
+      cuts = [0, *batches.each_index.to_a.sample(5, random: rng).sort, batches.length].uniq
+      squashed = cuts.each_cons(2).map { |from, to| squasher.squash(batches[from...to]) }
+      assert(squashed.each_cons(2).all? { |a, b| b.prev == a.seq })
+      assert_equal root.log.snapshot.to_h, fold_batches(squashed).to_h, "seed #{seed}"
     end
-    squasher = TaskProgress::Squasher.new
-    cuts = [0, *batches.each_index.to_a.sample(5, random: rng).sort, batches.length].uniq
-    squashed = cuts.each_cons(2).map { |from, to| squasher.squash(batches[from...to]) }
-    assert(squashed.each_cons(2).all? { |a, b| b.prev == a.seq })
-    assert_equal root.log.snapshot.to_h, fold_batches(squashed).to_h, "seed #{seed}"
   end
-end
 
   def test_buffered_keeps_a_slow_output_off_the_workers
     gate = Queue.new
@@ -124,7 +127,10 @@ end
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     100.times { root.note("n#{it}") }
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.5
-    loop { gate << :go; break if gate.num_waiting.zero? && (sleep(0.01) || true) && gate.num_waiting.zero? }
+    loop {
+      gate << :go
+      break if gate.num_waiting.zero? && (sleep(0.01) || true) && gate.num_waiting.zero?
+    }
     200.times { gate << :go }
     buffered.close
   end
@@ -149,7 +155,11 @@ end
     term = TaskProgress::TerminalOutput.new(io, interval: nil)
     root = TaskProgress.new("Import", outputs: [term])
     root.subtask("Done") { |t| t.subtask("Hidden").done! }
-    root.subtask("Broken") { raise "no disk" } rescue nil
+    begin
+      root.subtask("Broken") { raise "no disk" }
+    rescue
+      nil
+    end
     root.subtask("Running").update_to(percent: 5)
     lines = term.lines(root.log.snapshot)
     assert_equal 4, lines.length

@@ -26,46 +26,46 @@ class TaskProgress
 
   # Each file loads when its constant is first used, along with what it needs from the standard
   # library (json, openssl), so a program pays only for the parts it touches
-  autoload :VERSION,            "#{PARTS}/version"
-  autoload :Event,              "#{PARTS}/event"
-  autoload :OPS,                "#{PARTS}/event"
-  autoload :Batch,              "#{PARTS}/batch"
-  autoload :State,              "#{PARTS}/state"
-  autoload :Node,               "#{PARTS}/node"
-  autoload :Journal,            "#{PARTS}/journal"
-  autoload :Wire,               "#{PARTS}/wire"
-  autoload :Log,                "#{PARTS}/log"
-  autoload :Transaction,        "#{PARTS}/transaction"
-  autoload :Branch,             "#{PARTS}/branch"
-  autoload :Mount,              "#{PARTS}/mount"
-  autoload :Squasher,           "#{PARTS}/squasher"
-  autoload :SummaryOutput,      "#{PARTS}/summary_output"
-  autoload :NDJSONOutput,       "#{PARTS}/ndjson_output"
-  autoload :PublishingOutput,   "#{PARTS}/publishing_output"
-  autoload :BufferedOutput,     "#{PARTS}/buffered_output"
-  autoload :RactorOutput,       "#{PARTS}/ractor_output"
-  autoload :TerminalOutput,     "#{PARTS}/terminal_output"
+  autoload :VERSION, "#{PARTS}/version"
+  autoload :Event, "#{PARTS}/event"
+  autoload :OPS, "#{PARTS}/event"
+  autoload :Batch, "#{PARTS}/batch"
+  autoload :State, "#{PARTS}/state"
+  autoload :Node, "#{PARTS}/node"
+  autoload :Journal, "#{PARTS}/journal"
+  autoload :Wire, "#{PARTS}/wire"
+  autoload :Log, "#{PARTS}/log"
+  autoload :Transaction, "#{PARTS}/transaction"
+  autoload :Branch, "#{PARTS}/branch"
+  autoload :Mount, "#{PARTS}/mount"
+  autoload :Squasher, "#{PARTS}/squasher"
+  autoload :SummaryOutput, "#{PARTS}/summary_output"
+  autoload :NDJSONOutput, "#{PARTS}/ndjson_output"
+  autoload :PublishingOutput, "#{PARTS}/publishing_output"
+  autoload :BufferedOutput, "#{PARTS}/buffered_output"
+  autoload :RactorOutput, "#{PARTS}/ractor_output"
+  autoload :TerminalOutput, "#{PARTS}/terminal_output"
   autoload :ExecutionLogOutput, "#{PARTS}/execution_log_output"
-  autoload :SSE,                "#{PARTS}/sse"
-  autoload :Refinements,        "#{PARTS}/refinements"
-  autoload :CancelToken,        "#{PARTS}/cancel_token"
-  autoload :TrackedIO,          "#{PARTS}/tracked_io"
-  autoload :HTMLRenderer,       "#{PARTS}/html_renderer"
-  autoload :TurboStreamOutput,  "#{PARTS}/turbo_stream_output"
-  autoload :TurboSSE,           "#{PARTS}/turbo_sse"
-  autoload :MemoryStore,        "#{PARTS}/memory_store"
-  autoload :CancellationsApp,   "#{PARTS}/cancellations_app"
-  autoload :RailsDefaults,      "#{PARTS}/rails_defaults"
-  autoload :MemoryStream,       "#{PARTS}/memory_stream"
-  autoload :RedisStream,        "#{PARTS}/redis_stream"
-  autoload :StreamOutput,       "#{PARTS}/stream_output"
-  autoload :StreamReader,       "#{PARTS}/stream_reader"
-  autoload :Poll,               "#{PARTS}/poll"
-  autoload :Fold,               "#{PARTS}/fold"
-  autoload :RecordingOutput,    "#{PARTS}/recording_output"
-  autoload :Assertions,         "#{PARTS}/assertions"
-  autoload :JobSerializer,      "#{PARTS}/job_serializer"
-  autoload :TurboHelper,        "#{PARTS}/turbo_helper"
+  autoload :SSE, "#{PARTS}/sse"
+  autoload :Refinements, "#{PARTS}/refinements"
+  autoload :CancelToken, "#{PARTS}/cancel_token"
+  autoload :TrackedIO, "#{PARTS}/tracked_io"
+  autoload :HTMLRenderer, "#{PARTS}/html_renderer"
+  autoload :TurboStreamOutput, "#{PARTS}/turbo_stream_output"
+  autoload :TurboSSE, "#{PARTS}/turbo_sse"
+  autoload :MemoryStore, "#{PARTS}/memory_store"
+  autoload :CancellationsApp, "#{PARTS}/cancellations_app"
+  autoload :RailsDefaults, "#{PARTS}/rails_defaults"
+  autoload :MemoryStream, "#{PARTS}/memory_stream"
+  autoload :RedisStream, "#{PARTS}/redis_stream"
+  autoload :StreamOutput, "#{PARTS}/stream_output"
+  autoload :StreamReader, "#{PARTS}/stream_reader"
+  autoload :Poll, "#{PARTS}/poll"
+  autoload :Fold, "#{PARTS}/fold"
+  autoload :RecordingOutput, "#{PARTS}/recording_output"
+  autoload :Assertions, "#{PARTS}/assertions"
+  autoload :JobSerializer, "#{PARTS}/job_serializer"
+  autoload :TurboHelper, "#{PARTS}/turbo_helper"
 
   # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
   # constructor (Data#initialize, say) while Ractors run brings the process down, sometimes
@@ -399,7 +399,10 @@ class TaskProgress
 
   # A handle on the task at `path` in `log`, without opening anything
   #: (Log, path) -> TaskProgress
-  def self.handle(log, path) = allocate.tap { it.instance_variable_set(:@log, log); it.instance_variable_set(:@path, path.frozen? ? path : path.dup.freeze) } # :nodoc:
+  def self.handle(log, path) = allocate.tap {
+    it.instance_variable_set(:@log, log)
+    it.instance_variable_set(:@path, path.frozen? ? path : path.dup.freeze)
+  } # :nodoc:
 
   # The stream key a root from `handoff`, `adopt`, `follow` or `fetch` lives under, which is
   # all it takes to `adopt` or `follow` it from anywhere. Nil for any other task
@@ -422,7 +425,7 @@ class TaskProgress
     {
       name: node.name, status: node.status, percent: state.percent(path),
       count: (node.count if node.total || node.count.positive?), total: node.total,
-      message: node.message, error: (error && "#{error[:class]}: #{error[:message]}"),
+      message: node.message, error: error && "#{error[:class]}: #{error[:message]}",
       children: state.children(path).map { outline(state, it) }.then { it unless it.empty? }
     }.compact
   end
@@ -565,7 +568,7 @@ class TaskProgress
     @log.transaction do |tx|
       writable!(tx)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
-      tx << Event.new(path: @path, op: percent == 100 ? :done : :set, value: (percent unless percent == 100))
+      tx << Event.new(path: @path, op: (percent == 100) ? :done : :set, value: (percent unless percent == 100))
     end
     self
   end
@@ -748,7 +751,11 @@ class TaskProgress
   #: (String) -> Symbol?
   def take_cancel_request(line)
     require "json"
-    request = JSON.parse(line) rescue return
+    request = begin
+      JSON.parse(line)
+    rescue
+      return
+    end
     return unless request.is_a?(Hash) && (path = request["cancel"]).is_a?(Array) && path.length <= Wire::MAX_DEPTH
     return unless path.all? { it.is_a?(String) && it.match?(Wire::SEGMENT) }
     return request_cancel(path, Wire.text(request["reason"])) unless path.empty?

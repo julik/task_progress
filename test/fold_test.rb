@@ -17,7 +17,7 @@ class FoldTest < Minitest::Test
   end
 
   def test_done_and_waiting_siblings_fold_into_a_row_each
-    rows = big_tree.log.snapshot.rows.map { |path, node| [path.length, node.is_a?(TaskProgress::Fold) ? node.name : node.name] }
+    rows = big_tree.log.snapshot.rows.map { |path, node| [path.length, node.name] }
     assert_equal ["Thumbnails", "Files", "897 more done", "file 897", "file 898", "file 899", "file 900", "file 901", "file 902", "file 903",
       "file 904", "file 905", "file 906", "93 more waiting"], rows.map(&:last)
     assert_equal [0, 1, 2, 2], rows.first(4).map(&:first), "folds sit at their siblings' depth"

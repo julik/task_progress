@@ -183,7 +183,7 @@ class MountTest < Minitest::Test
   def test_a_batch_from_another_log_without_a_reset_is_a_gap
     local = TaskProgress.new("local")
     mount = local.mount("Engine")
-    one, one_batches = remote
+    _, one_batches = remote
     one_batches.each { mount << it }
     other, other_batches = remote
     other.subtask("x")

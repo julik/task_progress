@@ -403,7 +403,10 @@ class TaskTest < Minitest::Test
     reached = 0
     worker = Thread.new do
       root.subtask("Rows", total: 1000) do |rows|
-        1000.times { sleep 0.001; rows.tick! && reached += 1 }
+        1000.times {
+          sleep 0.001
+          rows.tick! && reached += 1
+        }
       end
       :carried_on
     end

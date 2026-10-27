@@ -106,7 +106,11 @@ class TaskProgress
       seconds = @clock.call - started
       return nil if seconds < 1
       rate = node.count / seconds
-      per = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(rate)}/s" : ((rate < 10) ? format("%.1f/s", rate) : "#{rate.floor}/s")
+      per = if node.unit == "bytes"
+        "#{TaskProgress.human_bytes(rate)}/s"
+      else
+        ((rate < 10) ? format("%.1f/s", rate) : "#{rate.floor}/s")
+      end
       total = node.total
       return per unless total && total > node.count
       "#{per}, #{TaskProgress.duration((total - node.count) / rate)} left"

@@ -29,6 +29,7 @@ ActionCable.server.config.logger = Logger.new(nil)
 class Import
   include ActiveModel::Model
   include ActiveModel::Conversion
+
   attr_accessor :id
   def persisted? = true
   def to_param = id.to_s
@@ -109,6 +110,7 @@ class RailsAppCheck < Minitest::Test
       ActiveJob::Base.execute(job.select { |k, _| k.is_a?(String) })
     end
   end
+
   def setup = Rails.cache.clear
 
   def import = @import ||= Import.new(id: 7)
@@ -154,7 +156,7 @@ class RailsAppCheck < Minitest::Test
     form = {path: html[/name="path" value="([^"]+)"/, 1], token: html[/name="token" value="([^"]+)"/, 1]}
 
     response = Rack::MockRequest.new(Rails.application).post("/task_progress/cancellations",
-      params: form, "HTTP_ACCEPT" => "text/vnd.turbo-stream.html, text/html")
+      :params => form, "HTTP_ACCEPT" => "text/vnd.turbo-stream.html, text/html")
     assert_equal [200, "text/vnd.turbo-stream.html"], [response.status, response.content_type]
     assert_equal :carried_on, worker.value, "the job picked the request out of Rails.cache, and canceled the task"
     assert_equal 403, Rack::MockRequest.new(Rails.application).post("/task_progress/cancellations", params: form.merge(token: "forged")).status
@@ -203,7 +205,10 @@ class RailsAppCheck < Minitest::Test
     assert_equal "text/event-stream", response.content_type
     frames = response.body.scan(/^data: (.*)$/).flatten.map { TaskProgress::Wire.parse(it) }
     state = TaskProgress::State.new
-    frames.each { |batch| (state = TaskProgress::State.new) if batch.reset?; batch.events.each { state.apply(it, at: batch.at) } }
+    frames.each { |batch|
+      (state = TaskProgress::State.new) if batch.reset?
+      batch.events.each { state.apply(it, at: batch.at) }
+    }
     assert state.complete?, "streamed to the end"
   end
 

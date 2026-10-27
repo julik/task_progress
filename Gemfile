@@ -13,6 +13,9 @@ group :examples do
 end
 
 group :development do
+  # Locked, with ruby_version in .standard.yml: the style is judged by Ruby 3.4, the oldest this
+  # gem runs on, however new the Ruby that runs the linter
+  gem "standard", "1.57.0", require: false
   # Types live inline, as RBS comments next to the code; rbs-inline writes them out to sig/, and
   # Steep checks the code against them
   gem "rbs-inline", require: false

@@ -36,7 +36,6 @@ class TaskProgress
     STATUSES = %w[pending active done failed canceled].freeze #: Array[String]
 
     class << self
-
       # The batch as a JSON-ready Hash
       #: (Batch) -> Hash[Symbol, untyped]
       def to_h(batch)
@@ -77,7 +76,9 @@ class TaskProgress
         io.binmode
         while (line = io.gets("\n", limit))
           if !line.end_with?("\n")
-            line = io.gets("\n", limit) until line.nil? || line.end_with?("\n") if line.bytesize >= limit
+            if line.bytesize >= limit
+              line = io.gets("\n", limit) until line.nil? || line.end_with?("\n")
+            end
             next
           end
           batch = parse(line)

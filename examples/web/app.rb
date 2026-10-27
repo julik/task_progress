@@ -126,7 +126,11 @@ class BenchApp
   # names a task, and the tree decides - in one transaction, so a task finishing as the request
   # arrives makes it moot rather than an error
   def cancel(request, job_id)
-    params = request.media_type == "application/json" ? (JSON.parse(request.body.read) rescue {}) : request.params
+    params = (request.media_type == "application/json") ? begin
+      JSON.parse(request.body.read)
+    rescue
+      {}
+    end : request.params
     return json({error: "invalid or expired token"}, 403) unless params.is_a?(Hash) && @tokens.verify(params["token"]) == job_id
     path = params["path"].to_s.split("-")
     return json({error: "malformed path"}, 422) unless path.length <= TaskProgress::Wire::MAX_DEPTH && path.all? { it.match?(TaskProgress::Wire::SEGMENT) }

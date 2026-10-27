@@ -56,7 +56,11 @@ class SSETest < Minitest::Test
     reader = Thread.new { read_frames(TaskProgress::SSE.new(root)) }
     sleep 0.02
     finisher = Thread.new { root.done! }
-    a.update_to(percent: 10) rescue nil
+    begin
+      a.update_to(percent: 10)
+    rescue
+      nil
+    end
     sleep 0.02
     gate << :go
     finisher.join

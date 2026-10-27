@@ -68,7 +68,7 @@ class WireTest < Minitest::Test
 
   def test_an_error_never_becomes_anything_but_strings_and_flags
     batch = TaskProgress::Wire.parse(line([[[], "fail", {class: {"nested" => 1}, message: 7, backtrace: "one line",
-      cause: "nope", input: true, extra: "string extras are dropped", class_name: [1]}]]))
+                                                         cause: "nope", input: true, extra: "string extras are dropped", class_name: [1]}]]))
     assert_equal({class: "unknown", message: "", backtrace: ["one line"], input: true}, batch.events.first.value)
   end
 

@@ -53,7 +53,11 @@ class TaskProgress
       input.rewind if input.respond_to?(:rewind)
       body = input&.read(4096).to_s
       if env["CONTENT_TYPE"].to_s.include?("json")
-        parsed = JSON.parse(body) rescue nil
+        parsed = begin
+          JSON.parse(body)
+        rescue
+          nil
+        end
         parsed.is_a?(Hash) ? parsed : {}
       else
         URI.decode_www_form(body).to_h

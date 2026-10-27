@@ -130,7 +130,7 @@ class TaskProgress
 
     # The nodes themselves, for an earlier snapshot to lend a new one what has not changed
     # : () -> Hash[path, Node]
-    def nodes: () -> Hash[path, Node]
+    attr_reader nodes: Hash[path, Node]
 
     private
 

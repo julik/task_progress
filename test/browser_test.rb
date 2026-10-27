@@ -94,7 +94,7 @@ class BrowserTest < Minitest::Test
   def test_the_turbo_pane_ends_up_as_the_other_two(names_and_statuses = ->(pane) { rows(pane).map { it.first(2) } })
     start("transaction", speed: "4")
     wait_for(message: "the Turbo pane never finished") { done?("#turbo-tree") && done?("#stimulus-tree") }
-    assert_equal names_and_statuses.("#stimulus-tree"), names_and_statuses.("#turbo-tree")
+    assert_equal names_and_statuses.call("#stimulus-tree"), names_and_statuses.call("#turbo-tree")
     wait_for(message: "the stream source never took itself off") { page.at_css("#turbo-source").nil? }
     assert_empty @errors
   end

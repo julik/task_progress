@@ -82,7 +82,7 @@ class TaskProgress
             value = Thread.handle_interrupt(Exception => :immediate) { yield(opened) }
             commit_locked(opened)
             value
-          rescue Exception
+          rescue Exception # rubocop:disable Lint/RescueException -- an interrupt rolls back as much as an error does
             @state.rollback(opened.journal)
             raise
           ensure
@@ -135,7 +135,7 @@ class TaskProgress
         (@on_cancel[path] ||= []) << block
         false
       end
-      block.call(now == true ? nil : now) if now
+      block.call((now == true) ? nil : now) if now
     end
 
     # A frozen copy of the tree, safe to read from anywhere - and from inside an output too,
@@ -200,7 +200,8 @@ class TaskProgress
     # it - which is what we want, since only the fiber that took the lock may join
     #: (Transaction?) -> void
     def current=(tx)
-      map = (Thread.current[:task_progress_transactions] ||= Hash.new.compare_by_identity)
+      fresh = {} #: Hash[Log, Transaction]
+      map = (Thread.current[:task_progress_transactions] ||= fresh.compare_by_identity)
       tx ? map[self] = tx : map.delete(self)
     end
 

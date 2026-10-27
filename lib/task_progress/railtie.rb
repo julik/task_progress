@@ -26,13 +26,17 @@ class TaskProgress
 
     initializer "task_progress.routes" do |app|
       path = app.config.task_progress.cancellations_path
-      app.routes.append do
-        mount TaskProgress::CancellationsApp.new(store: Rails.cache, tokens: TaskProgress::RailsDefaults.tokens) => path
-      end if path
+      if path
+        app.routes.append do
+          mount TaskProgress::CancellationsApp.new(store: Rails.cache, tokens: TaskProgress::RailsDefaults.tokens) => path
+        end
+      end
       js = app.config.task_progress.js_path
-      app.routes.append do
-        mount Rack::Files.new(TaskProgress.js_path, {"cache-control" => "no-cache"}) => js
-      end if js
+      if js
+        app.routes.append do
+          mount Rack::Files.new(TaskProgress.js_path, {"cache-control" => "no-cache"}) => js
+        end
+      end
     end
   end
 end

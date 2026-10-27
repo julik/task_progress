@@ -18,21 +18,21 @@ module DemoJob
     engine = root.mount("Engine (subprocess)", weight: 3, cancelable: true)
     publish = root.subtask("Publish")
 
-    download.run { 24.times { download.advance!(512 * 1024) && nap.(0.04) } }
+    download.run { 24.times { download.advance!(512 * 1024) && nap.call(0.04) } }
 
     parse.run do
       workers = 4.times.map { |n| parse.subtask("worker #{n + 1}", total: 40, cancelable: true) }
       workers.map do |worker|
-        Thread.new { worker.run { 40.times { |i| worker.tick!(message: "record #{i + 1}") && nap.(rand(0.01..0.05)) } } }
+        Thread.new { worker.run { 40.times { |i| worker.tick!(message: "record #{i + 1}") && nap.call(rand(0.01..0.05)) } } }
       end.each(&:join)
     end
 
-    wait.run { ["Connecting", "Negotiating", "Waiting in queue"].each { wait.note(it) && nap.(0.5) } }
+    wait.run { ["Connecting", "Negotiating", "Waiting in queue"].each { wait.note(it) && nap.call(0.5) } }
 
     engine.spawn(RbConfig.ruby, CHILD, "--speed", speed.to_s, *("--fail" if fail), err: File::NULL)
     raise "the engine failed: #{engine.task.error&.dig(:message)}" if engine.task.failed?
 
-    publish.run { publish.update_to(percent: 50, message: "Almost there") && nap.(0.3) }
+    publish.run { publish.update_to(percent: 50, message: "Almost there") && nap.call(0.3) }
     root
   end
 end

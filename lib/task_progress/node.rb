@@ -40,7 +40,7 @@ class TaskProgress
         h.delete(:stale) unless stale
         h.delete(:indeterminate) unless indeterminate
         h.delete(:cancelable) unless cancelable
-        h.delete(:weight) if weight == 1.0
+        h.delete(:weight) if weight == 1.0 # rubocop:disable Lint/FloatComparison -- the default, set exactly, never computed
       end
     end
 
