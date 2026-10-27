@@ -27,7 +27,8 @@ class RactorTest < Minitest::Test
         rescue RuntimeError
           nil
         end
-        port.send([:finished, n])
+      ensure
+        port.send([:finished, n]) # even when it dies, or the loop below waits forever
       end
     end
 

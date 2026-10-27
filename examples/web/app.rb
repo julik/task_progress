@@ -17,7 +17,7 @@ require_relative "../scenarios"
 class BenchApp
   PUBLIC = File.expand_path("public", __dir__)
   KEEP = 30
-  ASSETS = %w[/index.html /bench.js /bench.css /style.css /task_tree.js /row_view.js /stimulus_controller.js /react_task_tree.js]
+  ASSETS = %w[/index.html /bench.js /bench.css /style.css /task_tree.js /row_view.js /render_queue.js /stimulus_controller.js /react_task_tree.js]
 
   # `number` counts jobs as they start - the order to list and evict them in, wall clock or not
   Job = Data.define(:id, :number, :scenario, :root, :thread)

@@ -11,14 +11,16 @@ class OutputsTest < Minitest::Test
     def publish(name, payload) = @published << [name, payload]
   end
 
-  def test_lines_print_one_line_per_message_and_skip_bar_only_moves
+  def test_lines_print_one_line_per_message_and_per_tenth
     io = StringIO.new
     root = TaskProgress.new("demo", outputs: [TaskProgress::Outputs::Lines.new(io)])
     a, _b = root.subtask("A"), root.subtask("B")
     a.update_to(percent: 50, message: "Halfway")
+    a.update_to(percent: 52) # no new tenth
     a.update_to(percent: 60)
+    a.puts("Said")
     a.done!
-    assert_equal "[ 25%] Halfway\n[ 50%] A complete\n", io.string
+    assert_equal "[ 25%] Halfway\n[ 30%] demo\n[ 30%] Said\n[ 50%] A complete\n", io.string
   end
 
   def test_ndjson_writes_lines_a_mount_can_follow

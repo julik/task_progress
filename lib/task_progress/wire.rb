@@ -104,6 +104,7 @@ class TaskProgress
       when :set then value.is_a?(Numeric) ? value.clamp(0, 100) : :invalid
       when :add then value.is_a?(Integer) ? value.clamp(-MAX_COUNT, MAX_COUNT) : :invalid
       when :note then text(value)
+      when :say then text(value) || :invalid
       when :done, :prune then nil
       when :fail then value.is_a?(Hash) ? error(value) : :invalid
       when :put then node(value)

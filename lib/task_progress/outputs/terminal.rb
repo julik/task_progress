@@ -5,7 +5,8 @@ class TaskProgress
     # Redraws the tree in place on a terminal, from a ticker thread of its own so spinners turn
     # while nothing reports. A finished subtree folds into its one line, and when the tree is
     # taller than the screen the finished lines go first, then the ones not started. When the
-    # root finishes the tree is drawn one last time and left on screen - or erased, with `erase: true`
+    # root finishes the tree is drawn one last time and left on screen - or erased, with `erase: true`.
+    # A line a task `puts` goes above the tree and stays there
     #
     # With `interval: nil` there is no thread and every batch redraws, which is what tests want
     class Terminal
@@ -27,13 +28,16 @@ class TaskProgress
       end
 
       def call(batch, log)
+        said = batch.events.filter_map { it.value if it.op == :say }
         @lock.synchronize do
           @log = log
-          return if @closed
+          return said.each { @io.puts(it) } if @closed
+          print_above(said) unless said.empty?
           if log.snapshot[[]]&.finished?
             finish
-          elsif @interval.nil?
+          elsif @interval.nil? || !said.empty?
             draw
+            @ticker ||= Thread.new { tick } if @interval
           else
             @dirty = true
             @ticker ||= Thread.new { tick }
@@ -82,6 +86,11 @@ class TaskProgress
         @drawn = text.length
       end
 
+      def print_above(said)
+        @io.write("#{up}#{said.join("\n")}\n")
+        @drawn = 0
+      end
+
       def clear
         @io.write(up)
         @io.flush
@@ -111,6 +120,7 @@ class TaskProgress
         indent = "  " * path.length
         parts = ["#{indent}#{icon(node)} #{node.name}"]
         parts << measure(snapshot, path, node)
+        parts << pace(node) if node.status == :active && node.children.empty?
         parts << elapsed(node)
         parts << (node.status == :failed ? node.error&.dig(:message) : node.message)
         parts.compact.reject(&:empty?).join("  ")[0, width - 1]
@@ -129,7 +139,7 @@ class TaskProgress
         return nil if node.status == :done && path.length.positive?
         percent = snapshot.percent(path)
         if node.children.empty? && node.indeterminate
-          nil
+          (node.unit == "bytes") ? TaskProgress.human_bytes(node.count) : node.count.to_s if node.count.positive?
         elsif node.children.empty? && node.total
           count = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(node.count)} / #{TaskProgress.human_bytes(node.total)}" : "#{node.count}/#{node.total}"
           "#{bar(percent)} #{count}"
@@ -143,10 +153,27 @@ class TaskProgress
         "#{"█" * filled}#{"░" * (BAR - filled)}"
       end
 
+      # The rate over the whole run so far, and the time left at that rate. Steadier than a
+      # rate over the last few ticks, which jumps about with every pause in the work
+      def pace(node)
+        seconds = @clock.call - node.started_at if node.started_at
+        return nil unless seconds && seconds >= 1 && node.count.positive?
+        rate = node.count / seconds
+        per = (node.unit == "bytes") ? "#{TaskProgress.human_bytes(rate)}/s" : format((rate < 10) ? "%.1f/s" : "%d/s", rate)
+        return per unless node.total && node.total > node.count
+        "#{per}  ETA #{duration((node.total - node.count) / rate)}"
+      end
+
       def elapsed(node)
         return nil unless node.started_at
-        seconds = (node.finished_at || @clock.call) - node.started_at
-        (seconds < 60) ? format("%.1fs", seconds) : format("%dm%02ds", seconds / 60, seconds % 60)
+        duration((node.finished_at || @clock.call) - node.started_at)
+      end
+
+      def duration(seconds)
+        if seconds < 60 then format("%.1fs", seconds)
+        elsif seconds < 3600 then format("%dm%02ds", seconds / 60, seconds % 60)
+        else format("%dh%02dm", seconds / 3600, seconds % 3600 / 60)
+        end
       end
 
       def columns = size[1]

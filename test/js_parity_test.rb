@@ -13,7 +13,7 @@ class JsParityTest < Minitest::Test
   end
 
   def test_the_browser_clients_own_tests
-    out, status = Open3.capture2e("node", "--test", File.expand_path("../examples/web/test/clock.test.mjs", __dir__))
+    out, status = Open3.capture2e("node", "--test", *Dir[File.expand_path("../examples/web/test/*.test.mjs", __dir__)])
     assert status.success?, out
   end
 

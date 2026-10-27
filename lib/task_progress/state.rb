@@ -10,7 +10,7 @@ class TaskProgress
     FIELDS = %i[name total count percent weight expect indeterminate unit message status error stale
       opened_at started_at finished_at].freeze
 
-    Node = Struct.new(*FIELDS, :children, :sealed) do
+    Node = Struct.new(*FIELDS, :children, :sealed, :autofinish) do
       def finished? = status == :done || status == :failed
 
       def to_h
@@ -110,6 +110,8 @@ class TaskProgress
           @nodes.delete(sub)
         end
         node.children = []
+      when :say
+        existing!(path, node)
       when :put
         parent = parent_of!(path)
         journal&.touch(path, node)
@@ -119,6 +121,7 @@ class TaskProgress
         fresh.status = fresh.status.to_sym
         fresh.children = node ? node.children : []
         fresh.sealed = node&.sealed
+        fresh.autofinish = node&.autofinish
         @nodes[path] = fresh
         adopt(parent, path) if parent && node.nil?
       else

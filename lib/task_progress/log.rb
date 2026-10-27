@@ -16,7 +16,7 @@ class TaskProgress
 
     # Lower case only, like the task ids, so neither can clash with another on a filesystem that
     # ignores case (macOS, Windows) should one ever end up in a file name
-    ID_CHARS = [*"0".."9", *"a".."z"].freeze
+    ID_CHARS = Ractor.make_shareable([*"0".."9", *"a".."z"])
 
     def initialize(id: SecureRandom.alphanumeric(10, chars: ID_CHARS), clock: -> { Process.clock_gettime(Process::CLOCK_REALTIME) }, random: Random.new)
       @id = id.to_s

@@ -2,6 +2,8 @@
 // does, and works out percents by the same rules. Framework-free - the Stimulus and React
 // demos both sit on top of it.
 
+import { RenderQueue } from "./render_queue.js"
+
 const key = (path) => path.join("/")
 const parentKey = (path) => key(path.slice(0, -1))
 
@@ -134,6 +136,7 @@ export class TaskTree {
       case "set": this.#start(path, at); node.percent = value; break
       case "add": this.#start(path, at); node.count = Math.max(node.count + value, 0); break
       case "note": this.#start(path, at); node.message = value ?? null; break
+      case "say": break // a line for a log pane - nothing in the tree changes
       case "done":
       case "fail":
         this.#start(path, at)
@@ -162,24 +165,25 @@ export class TaskTree {
   }
 }
 
-// Follows a TaskProgress::SSE stream, calling onChange(tree) after every batch. On a gap it
-// reconnects, and the server starts it over from a fresh squash
-export function follow(url, onChange) {
+// Follows a TaskProgress::SSE stream. Every batch goes into the tree as it arrives, and
+// onChange(tree, changes) is called at most once a frame with what they changed - see render_queue.js.
+// On a gap it reconnects, and the server starts it over from a fresh squash
+export function follow(url, onChange, { schedule } = {}) {
   const tree = new TaskTree()
+  const queue = new RenderQueue(tree, onChange, { schedule })
   let source
   const connect = () => {
     source = new EventSource(url)
     source.addEventListener("batch", (event) => {
-      if (tree.apply(JSON.parse(event.data)) === "gap") {
+      if (queue.apply(JSON.parse(event.data)) === "gap") {
         source.close()
         connect()
       }
-      onChange(tree)
       if (tree.root && (tree.root.status === "done" || tree.root.status === "failed")) source.close()
     })
   }
   connect()
-  return { tree, close: () => source.close() }
+  return { tree, close: () => { source.close(); queue.close() } }
 }
 
 export function humanBytes(n) {

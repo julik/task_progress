@@ -15,6 +15,27 @@ Any run of batches can be squashed into one, and a reader that joins late starts
 
 ## On the command line
 
+A bar, the way it always worked:
+
+```ruby
+bar = TaskProgress.bar("Importing", total: rows.size)
+rows.each { import(it) && bar.tick! }
+```
+
+Or over a collection, which takes its total from `size`:
+
+```ruby
+TaskProgress.iterate(rows, "Importing") { |row| import(row) }
+```
+
+```
+⠹ Importing  ██████████░░░░░░░░░░ 21/40  19/s  ETA 1.0s  1.1s
+```
+
+The bar finishes once its count reaches the total. `bar.puts("Skipped row 12")` prints a line above it that stays. With `using TaskProgress::Refinements`, `rows.each.with_progress("Importing") { }` works too.
+
+For a tree of tasks:
+
 ```ruby
 TaskProgress.cli("Import") do |root|
   download = root.subtask("Download", total: io.size, unit: "bytes")
@@ -26,7 +47,7 @@ TaskProgress.cli("Import") do |root|
 end
 ```
 
-On a terminal it redraws the tree in place. Piped, it prints one line per message. Spawned by a parent through `Mount#spawn`, it writes batches up the pipe instead.
+On a terminal it redraws the tree in place. Piped, it prints one line per message and one every 10%. Spawned by a parent through `Mount#spawn`, it writes batches up the pipe instead.
 
 ## Tasks
 
@@ -34,6 +55,9 @@ On a terminal it redraws the tree in place. Piped, it prints one line per messag
 - `run { }`: done when the block returns, failed with the error when it raises (`Interrupt` included). The error is re-raised.
 - `update_to(percent:, message:)`, `advance!(n)`, `tick!`, `note(message)`, `total=`.
 - `done!`, `fail!(error_or_message, **flags)`.
+- `iterate(collection, name, total:, step:) { |item| }`: a subtask that advances once per item and finishes with the loop. Without a block, an Enumerator.
+- `puts(message)`: a line printed above the tree. The tree does not keep it, so a reader joining later does not see it.
+- `autofinish!`: done once the count reaches the total. `bar` and `iterate` turn it on; in a tree only `done!` finishes a task.
 - `transaction { }`: everything in the block lands as one batch, or nothing does.
 - `track_io(io, total:, step:) { |io| }`: reading the IO advances the task by bytes. This works for `read`, line reads, `readpartial` and so `IO.copy_stream`, and seeks back do not count twice. The task moves in steps of 0.1% of the total, not once per read. It needs the optional `progressive_io` gem, and an IO with a position. For a pipe or a socket, call `advance!(chunk.bytesize)` instead.
 

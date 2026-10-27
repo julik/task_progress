@@ -35,3 +35,13 @@ test("a finished task shows its own duration", () => {
   const root = tree.get([])
   assert.equal(root.finished_at - root.started_at, 7.5)
 })
+
+test("a counted task shows its rate and the time left, on the writer's clock", () => {
+  let local = 1_000_000
+  const tree = new TaskTree({ clock: () => local })
+  tree.apply(batch(1, 5_000, [[[], "open", { name: "root" }], [["a0b1"], "open", { name: "rows", total: 100 }]], 0))
+  tree.apply(batch(2, 5_000, [[["a0b1"], "add", 1]]))
+  tree.apply(batch(3, 5_010, [[["a0b1"], "add", 19], [["a0b1"], "say", "a line for the log, not the tree"]]))
+  local += 10
+  assert.equal(rowView(tree, tree.get(["a0b1"])).message, "1.0/s, 1m20s left") // 20 rows in the 20s since it started
+})

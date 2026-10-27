@@ -2,6 +2,7 @@ import { Application } from "@hotwired/stimulus"
 import TaskTreeController from "/stimulus_controller.js"
 import { mountTaskTree } from "/react_task_tree.js"
 import { TaskTree } from "/task_tree.js"
+import { nextFrame } from "/render_queue.js"
 
 Application.start().register("task-tree", TaskTreeController)
 const react = mountTaskTree(document.getElementById("react-tree"))
@@ -67,15 +68,18 @@ async function refreshJobs() {
 }
 
 // Reads the stream at the level of batches: what arrived, how it chained, and how often the
-// connection had to start over
+// connection had to start over. It counts every batch, but like the renderers it only touches
+// the page once a frame. The renders are the Stimulus pane's, to show how many batches each draw took in
 const inspector = {
   source: null,
   follow(url) {
     this.source?.close()
     this.tree = new TaskTree()
-    this.stats = { frames: 0, ops: 0, resets: 0, gaps: 0, duplicates: 0, reconnects: 0, seq: "–", "batches/s": 0, root: "–" }
+    this.stats = { frames: 0, ops: 0, resets: 0, gaps: 0, duplicates: 0, reconnects: 0, seq: "–", "batches/s": 0, renders: 0, "renders/s": 0, root: "–" }
     this.opens = 0
     this.times = []
+    this.renders = []
+    this.lines = []
     $("log").replaceChildren()
     this.render()
     this.source = new EventSource(url)
@@ -99,20 +103,39 @@ const inspector = {
     const summary = Object.entries(counts).map(([op, n]) => (n > 1 ? `${op}×${n}` : op)).join(" ")
     const kind = batch.prev === 0 ? "reset" : result === "applied" ? "" : result
     this.line(`#${batch.seq} ← ${batch.prev}  ${bytes}B  ${summary}${kind ? `  (${kind})` : ""}`, kind)
-    this.render()
     if (root && (root.status === "done" || root.status === "failed")) {
       this.source.close()
       this.line(`stream closed: root ${root.status}`, "")
       refreshJobs()
     }
   },
+  rendered() {
+    const now = performance.now()
+    this.renders = this.renders.filter((t) => now - t < 1000).concat(now)
+    Object.assign(this.stats, { renders: this.stats.renders + 1, "renders/s": this.renders.length })
+    this.request()
+  },
   line(text, kind) {
-    const li = document.createElement("li")
-    li.textContent = text
-    if (kind) li.className = kind
+    this.lines.push([text, kind])
+    this.request()
+  },
+  request() {
+    if (this.pending) return
+    this.pending = true
+    nextFrame(() => { this.pending = false; this.flush() })
+  },
+  // Only the last 300 lines are kept, so a frame never builds more than that
+  flush() {
     const log = $("log")
-    log.prepend(li)
+    log.prepend(...this.lines.slice(-300).reverse().map(([text, kind]) => {
+      const li = document.createElement("li")
+      li.textContent = text
+      if (kind) li.className = kind
+      return li
+    }))
+    this.lines = []
     while (log.children.length > 300) log.lastChild.remove()
+    this.render()
   },
   render() {
     $("stats").replaceChildren(...Object.entries(this.stats).map(([name, value]) => {
@@ -125,6 +148,8 @@ const inspector = {
     }))
   }
 }
+
+$("stimulus-tree").addEventListener("task-tree:render", () => inspector.rendered())
 
 await loadScenarios()
 refreshJobs()

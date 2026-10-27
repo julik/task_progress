@@ -9,6 +9,7 @@ require_relative "task_progress/branch"
 require_relative "task_progress/mount"
 require_relative "task_progress/outputs"
 require_relative "task_progress/sse"
+require_relative "task_progress/refinements"
 
 # Hierarchical progress for task trees. A TaskProgress is a handle onto one node of a tree; the
 # tree itself is a Log of change events, applied and numbered under one lock, which outputs
@@ -47,6 +48,30 @@ class TaskProgress
       Outputs::Lines.new(io)
     end
   end
+
+  # A single bar, the way progress bars always worked: no block, and it finishes by itself once
+  # its count reaches `total`. Without a total it counts and spins. The last frame is drawn at
+  # exit, finished or not
+  #
+  #   bar = TaskProgress.bar("Importing", total: rows.size)
+  #   rows.each { import(it) && bar.tick! }
+  def self.bar(name = File.basename($PROGRAM_NAME), total: nil, io: $stderr, quiet: false, **attributes)
+    output = cli_output(io:, quiet:)
+    root = new(name, outputs: [output].compact, total:, indeterminate: total.nil?, **attributes)
+    root.autofinish!
+    at_exit { output.close } if output.respond_to?(:close)
+    root
+  end
+
+  # A bar over a collection, see `bar` and `iterate`
+  #
+  #   TaskProgress.iterate(rows, "Importing") { |row| import(row) }
+  def self.iterate(collection, name = File.basename($PROGRAM_NAME), total: TaskProgress.size_of(collection), step: 1, **, &block)
+    bar(name, total:, **).iterate(collection, step:, &block)
+  end
+
+  # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
+  def self.size_of(collection) = (collection.size if collection.respond_to?(:size))
 
   # A silent root, for a library's default
   def self.null(name = "progress") = new(name)
@@ -139,13 +164,66 @@ class TaskProgress
   def advance!(by = 1, message: nil)
     @log.transaction do |tx|
       writable!(tx)
+      node = tx.state[@path]
+      next if node.autofinish && node.finished? # a collection longer than its size said
       tx << Event.new(path: @path, op: :add, value: by)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
+      tx << Event.new(path: @path, op: :done) if node.autofinish && node.total && node.count >= node.total
     end
     self
   end
 
   def tick!(message: nil) = advance!(1, message:)
+
+  # Goes through a collection a step per item. Given a name it opens a subtask for it, and
+  # otherwise counts on this task. The total comes from `size`, never `count` - so a lazy
+  # enumerator stays lazy, and one with no size just counts. Done when the loop ends, failed
+  # with the error if the block raises. Without a block it returns an Enumerator, which does
+  # the same as it is consumed
+  #
+  #   root.iterate(files, "Files") { |file| copy(file) }
+  #   root.iterate(rows, "Rows").map { transform(it) }
+  def iterate(collection, name = nil, total: TaskProgress.size_of(collection), step: 1, &block)
+    if name
+      task = subtask(name, total:, indeterminate: total.nil?)
+    else
+      task = self
+      meta(total:, indeterminate: false) if total && self.total.nil?
+    end
+    task.autofinish!
+    # Advancing costs a transaction, so it goes in steps of a thousandth of the total - what a
+    # bar can show anyway - and a loop over cheap items is not held up by its own progress
+    every = total ? [total / 1000, 1].max * step : step
+    enumerator = Enumerator.new do |yielder|
+      pending = 0
+      task.run do
+        collection.each do |item|
+          yielder << item
+          next if (pending += step) < every
+          task.advance!(pending)
+          pending = 0
+        end
+      ensure
+        task.advance!(pending) if pending.positive?
+      end
+    end
+    block ? enumerator.each(&block) : enumerator
+  end
+
+  # Done once the count reaches the total, the way a lone progress bar finishes. A tree keeps to
+  # its rule that only `done!` finishes a task, since a parent can reach its count well before
+  # its children are through
+  def autofinish!
+    @log.transaction { |tx| writable!(tx) && tx.state[@path].autofinish = true }
+    self
+  end
+
+  # Prints a line above the tree, where it stays. It changes nothing in the tree itself, so a
+  # reader joining later never sees it - like anything said on a terminal
+  def puts(message)
+    @log.transaction { |tx| writable!(tx) && tx << Event.new(path: @path, op: :say, value: TaskProgress.utf8(message.to_s)) }
+    self
+  end
 
   def note(message)
     @log.transaction { |tx| writable!(tx) && tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) }
