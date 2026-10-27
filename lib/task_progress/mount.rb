@@ -31,21 +31,23 @@ class TaskProgress
     # :duplicate for one already applied - redelivery is ordinary after a reconnect or a replay
     def <<(batch)
       batch = coerce(batch) or return :rejected
-      if batch.reset?
-        events = [Event.new(path: @path, op: :prune), *translate(batch.events)]
-      elsif batch.log == @source && batch.seq <= @last_seq
+      if batch.log == @source && !batch.reset? && batch.seq <= @last_seq
         return :duplicate
-      elsif batch.log != @source || batch.prev != @last_seq
+      elsif !batch.reset? && (batch.log != @source || batch.prev != @last_seq)
         mark_stale
         return :gap
-      else
-        events = translate(batch.events)
       end
-      return :rejected if events.nil?
-      @log.transaction do |tx|
+      applied = @log.transaction do |tx|
+        # The remote's times are on its clock. Its batch says what that clock read when it
+        # committed, so the gap to ours moves them over - give or take the time in transit
+        offset = batch.at.positive? ? tx.at - batch.at : 0.0
+        events = translate(batch.events, offset) or next false
+        events.unshift(Event.new(path: @path, op: :prune)) if batch.reset?
         events.each { tx << it }
         tx << Event.new(path: @path, op: :meta, value: {stale: false}) if @stale
+        true
       end
+      return :rejected unless applied
       @source = batch.log
       @last_seq = batch.seq
       @stale = false
@@ -120,19 +122,25 @@ class TaskProgress
       @log.append(Event.new(path: @path, op: :meta, value: {stale: true}))
     end
 
-    def translate(events)
+    def translate(events, offset)
       events.map do |event|
         path = [*@path, *event.path]
         return nil if path.length > Wire::MAX_DEPTH
-        next Event.new(path:, op: event.op, value: event.value) unless event.path.empty?
+        value = (event.op == :put) ? rebased(event.value, offset) : event.value
+        next Event.new(path:, op: event.op, value:) unless event.path.empty?
         case event.op
-        when :open then Event.new(path:, op: :meta, value: event.value.except(:name, :weight))
-        when :meta then Event.new(path:, op: :meta, value: event.value.except(:name, :weight))
-        when :put then Event.new(path:, op: :put, value: own_put(event.value))
-        when :prune then Event.new(path:, op: :prune)
-        else Event.new(path:, op: event.op, value: event.value)
+        when :open, :meta then Event.new(path:, op: :meta, value: value.except(:name, :weight))
+        when :put then Event.new(path:, op: :put, value: own_put(value))
+        else Event.new(path:, op: event.op, value:)
         end
       end
+    end
+
+    TIMES = %i[opened_at started_at finished_at].freeze
+
+    def rebased(value, offset)
+      return value if offset.zero?
+      value.merge(value.slice(*TIMES).compact.transform_values { it + offset })
     end
 
     def own_put(value)

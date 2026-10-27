@@ -12,6 +12,11 @@ class JsParityTest < Minitest::Test
     skip "node is not installed" unless system("node", "--version", out: File::NULL, err: File::NULL)
   end
 
+  def test_the_browser_clients_own_tests
+    out, status = Open3.capture2e("node", "--test", File.expand_path("../examples/web/test/clock.test.mjs", __dir__))
+    assert status.success?, out
+  end
+
   def test_the_browser_client_folds_to_the_same_percents
     10.times do |seed|
       rng = Random.new(seed)

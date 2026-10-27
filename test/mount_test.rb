@@ -86,6 +86,43 @@ class MountTest < Minitest::Test
     assert_equal 30, mount.task.subtasks.first.percent
   end
 
+  def test_a_remote_trees_times_move_onto_our_clock
+    remote_time = 1_000.0
+    child = TaskProgress.new("child", log: TaskProgress::Log.new(clock: -> { remote_time }))
+    a = child.subtask("A")
+    remote_time = 1_010.0
+    a.update_to(percent: 5)
+    remote_time = 1_030.0 # A has run 20 seconds by the remote's clock
+
+    local_time = 5_000.0
+    local = TaskProgress.new("local", log: TaskProgress::Log.new(clock: -> { local_time }))
+    mount = local.mount("Engine")
+    mount << child.log.squashed
+    node = mount.task.subtasks.first.node
+    assert_in_delta 4_980.0, node.started_at, 0.001, "still 20 seconds before now, by our clock"
+    assert_in_delta 4_970.0, node.opened_at, 0.001
+
+    local_time = 5_005.0
+    remote_time = 1_035.0
+    batches, output = recording
+    child.log.subscribe(output, replay: false)
+    a.done!
+    mount << batches.last
+    assert_in_delta 25.0, mount.task.subtasks.first.node.then { it.finished_at - it.started_at }, 0.001
+  end
+
+  def test_a_reset_with_a_path_too_deep_is_rejected_not_half_applied
+    local = TaskProgress.new("local")
+    deep = (TaskProgress::Wire::MAX_DEPTH - 2).times.reduce(local) { |t, i| t.subtask("d#{i}") }
+    mount = deep.mount("Engine")
+    child, = remote
+    child.subtask("fits")
+    assert_equal :applied, mount << child.log.squashed
+    child.subtasks.first.subtask("one level too many")
+    assert_equal :rejected, mount << child.log.squashed
+    assert_equal ["fits"], mount.task.subtasks.map(&:name), "the subtree was not pruned away"
+  end
+
   def test_a_batch_already_applied_is_a_duplicate_not_a_gap
     local = TaskProgress.new("local")
     mount = local.mount("Engine")

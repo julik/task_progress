@@ -15,12 +15,19 @@ const ATTRIBUTES = ["name", "total", "weight", "expect", "indeterminate", "unit"
 const FIELDS = [...ATTRIBUTES, "count", "percent", "message", "status", "error", "stale", "opened_at", "started_at", "finished_at"]
 
 export class TaskTree {
-  constructor() {
+  // `clock` gives seconds since the epoch, and only matters for elapsed times
+  constructor({ clock = () => Date.now() / 1000 } = {}) {
     this.nodes = new Map()
     this.log = null
     this.seq = null
     this.stale = false
+    this.clock = clock
+    this.offset = null
   }
+
+  // Now, by the clock of whoever wrote the tree - so an elapsed time is never off by the skew
+  // between that machine and this one
+  now() { return this.clock() - (this.offset ?? 0) }
 
   // Returns "applied", "duplicate" for a batch it already has, or "gap" when the batch does not follow the last one - the tree is then
   // stale, and stays so until a batch with prev 0 (a fresh squash) replaces it
@@ -34,6 +41,7 @@ export class TaskTree {
       return "gap"
     }
     for (const [path, op, value] of batch.ops) this.#applyOp(path, op, value, batch.at)
+    this.#measureOffset(batch)
     this.log = batch.log
     this.seq = batch.seq
     this.stale = false
@@ -83,6 +91,14 @@ export class TaskTree {
   percentOf(node) {
     if (this.complete(node)) return 100
     return Math.min(Math.round(this.fraction(node) * 100), 99)
+  }
+
+  // Each batch says what the writer's clock read when it committed. The smallest gap to ours has
+  // the least time in transit in it, so that is the one kept
+  #measureOffset(batch) {
+    if (!batch.at) return
+    const offset = this.clock() - batch.at
+    this.offset = batch.log !== this.log || this.offset === null ? offset : Math.min(this.offset, offset)
   }
 
   #missing(node) { return Math.max((node.expect ?? 0) - node.children.length, 0) }

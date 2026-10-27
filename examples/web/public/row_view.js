@@ -1,4 +1,4 @@
-import { humanBytes } from "/task_tree.js"
+import { humanBytes } from "./task_tree.js"
 
 const GLYPHS = { done: "✓", failed: "✗", pending: "·" }
 
@@ -11,7 +11,7 @@ export function rowView(tree, node) {
   if (leaf && node.total != null) {
     measure = node.unit === "bytes" ? `${humanBytes(node.count)} / ${humanBytes(node.total)}` : `${node.count} / ${node.total}`
   } else if (indeterminate) {
-    measure = elapsed(node)
+    measure = elapsed(tree, node)
   }
   // Every state is one inner span, so the .icon box around it never changes; the spinner is drawn in CSS
   const glyph = GLYPHS[node.status]
@@ -23,7 +23,8 @@ export function rowView(tree, node) {
   }
 }
 
-function elapsed(node) {
+// Measured on the clock the times came from, never this machine's
+function elapsed(tree, node) {
   if (!node.started_at) return ""
-  return `${Math.max(0, Date.now() / 1000 - node.started_at).toFixed(1)}s`
+  return `${Math.max(0, (node.finished_at ?? tree.now()) - node.started_at).toFixed(1)}s`
 }
