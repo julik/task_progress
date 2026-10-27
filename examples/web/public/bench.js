@@ -1,8 +1,8 @@
 import { Application } from "@hotwired/stimulus"
-import TaskTreeController from "/stimulus_controller.js"
-import { mountTaskTree } from "/react_task_tree.js"
-import { TaskTree } from "/task_tree.js"
-import { nextFrame } from "/render_queue.js"
+import TaskTreeController from "/task_progress/stimulus_controller.js"
+import { mountTaskTree } from "/task_progress/react_task_tree.js"
+import { TaskTree } from "/task_progress/task_tree.js"
+import { nextFrame } from "/task_progress/render_queue.js"
 
 Application.start().register("task-tree", TaskTreeController)
 const react = mountTaskTree(document.getElementById("react-tree"))

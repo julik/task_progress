@@ -11,7 +11,7 @@ Gem::Specification.new do |s|
   s.license = "MIT"
   s.required_ruby_version = ">= 3.4"
 
-  s.files = Dir["lib/**/*.rb", "README.md", "LICENSE*"]
+  s.files = Dir["lib/**/*.rb", "js/*.{js,css}", "README.md", "LICENSE*"]
   s.require_paths = ["lib"]
 
   s.add_development_dependency "minitest", "~> 5.25"

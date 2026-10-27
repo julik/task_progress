@@ -1,8 +1,8 @@
 // node --test examples/web/test/
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { TaskTree } from "../public/task_tree.js"
-import { RenderQueue } from "../public/render_queue.js"
+import { TaskTree } from "../../js/task_tree.js"
+import { RenderQueue } from "../../js/render_queue.js"
 
 const batch = (seq, ops, prev = seq - 1) => ({ log: "w", prev, seq, at: seq, ops })
 

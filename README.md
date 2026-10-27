@@ -83,7 +83,13 @@ root.add_output(TaskProgress::Outputs::Publish.new(sossego_stream))  # a job els
 
 Any task can be streamed on its own: `SSE.new(upload)` or `upload.add_output(output)` sends just that subtree, with `upload` as its root - first squashed, then live. Batches elsewhere in the tree are left out, and the branch numbers its batches itself, so a reader sees no gaps. Feed it to a Mount and the subtree is grafted back whole.
 
-`examples/web` has a Stimulus and a React renderer on a shared client (`task_tree.js`), which folds batches the same way the Ruby side does. A test holds the two to the same result. The terminal demo is `ruby -Ilib examples/cli_demo.rb`.
+The browser client ships with the gem, in `js/` (`TaskProgress.js_path`): `task_tree.js` folds batches the same way the Ruby side does, and a test holds the two to the same result. `render_queue.js` draws at most once a frame, however fast batches come. There is a Stimulus controller and a React component on top, and `task_tree.css` for their rows. Nothing to build - serve the directory under any prefix, for example with [Assiette](https://github.com/julik/assiette):
+
+```ruby
+use Assiette::Server, root: "public", additional_directory_mappings: {"/task_progress" => TaskProgress.js_path}
+```
+
+The terminal demo is `ruby -Ilib examples/cli_demo.rb`.
 
 ## The bench
 

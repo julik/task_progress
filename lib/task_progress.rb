@@ -73,6 +73,11 @@ class TaskProgress
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
   def self.size_of(collection) = (collection.size if collection.respond_to?(:size))
 
+  # Where the browser client lives: `task_tree.js` (the fold, and `follow` for an SSE stream),
+  # `render_queue.js`, `row_view.js`, a Stimulus controller, a React component and
+  # `task_tree.css`. No build step - serve the directory as it is, under any prefix
+  def self.js_path = File.expand_path("../js", __dir__)
+
   # A silent root, for a library's default
   def self.null(name = "progress") = new(name)
 

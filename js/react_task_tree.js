@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import htm from "htm"
-import { follow } from "/task_tree.js"
-import { rowView } from "/row_view.js"
+import { follow } from "./task_tree.js"
+import { rowView } from "./row_view.js"
 
 const html = htm.bind(React.createElement)
 

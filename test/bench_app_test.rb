@@ -80,7 +80,16 @@ class BenchAppTest < Minitest::Test
     assert_includes JSON.parse(@request.get("/jobs").body).map { it["id"] }, job["id"]
     assert_equal 404, @request.post("/jobs?scenario=nope").status
     assert_equal 404, @request.get("/jobs/nope/events").status
-    assert_equal 302, @request.get("/").status
-    assert_equal 200, @request.get("/index.html").status
+    assert_equal 200, @request.get("/").status
+  end
+
+  # Every asset the page links has to be served at the URL it was linked as - a stale ?s= or a
+  # file left behind in a move would leave the page without its scripts
+  def test_the_page_links_assets_that_are_served
+    page = @request.get("/").body
+    links = page.scan(/(?:href|src)="(\/[^"]+\?s=\w+)"/).flatten
+    assert_operator links.length, :>=, 8
+    links.each { assert_equal 200, @request.get(it).status, it }
+    assert_includes links.join, "/task_progress/task_tree.js"
   end
 end

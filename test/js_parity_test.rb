@@ -6,14 +6,14 @@ require "tmpdir"
 class JsParityTest < Minitest::Test
   include TestHelpers
 
-  SCRIPT = File.expand_path("../examples/web/test/parity.mjs", __dir__)
+  SCRIPT = File.expand_path("js/parity.mjs", __dir__)
 
   def setup
     skip "node is not installed" unless system("node", "--version", out: File::NULL, err: File::NULL)
   end
 
   def test_the_browser_clients_own_tests
-    out, status = Open3.capture2e("node", "--test", *Dir[File.expand_path("../examples/web/test/*.test.mjs", __dir__)])
+    out, status = Open3.capture2e("node", "--test", *Dir[File.expand_path("js/*.test.mjs", __dir__)])
     assert status.success?, out
   end
 

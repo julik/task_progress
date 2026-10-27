@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 
+require "erb"
 require "json"
 require "rack"
-require "rack/static"
+require "assiette"
 require_relative "../scenarios"
 
 # The bench behind bin/dev. Starts scenario jobs in this process and serves each tree as SSE.
 #
-#   GET  /                       the bench page
+#   GET  /                       the bench page; its scripts and styles come from Assiette, with
+#                                the gem's own JS mounted at /task_progress
 #   GET  /scenarios              what can be started
 #   GET  /jobs                   the jobs started lately, newest first
 #   POST /jobs?scenario=&speed=  starts one
@@ -16,8 +18,8 @@ require_relative "../scenarios"
 #                                frames, so the browser has to reconnect and resume
 class BenchApp
   PUBLIC = File.expand_path("public", __dir__)
+  PAGE = ERB.new(File.read(File.join(PUBLIC, "index.html.erb")), trim_mode: "<>")
   KEEP = 30
-  ASSETS = %w[/index.html /bench.js /bench.css /style.css /task_tree.js /row_view.js /render_queue.js /stimulus_controller.js /react_task_tree.js]
 
   # `number` counts jobs as they start - the order to list and evict them in, wall clock or not
   Job = Data.define(:id, :number, :scenario, :root, :thread)
@@ -26,10 +28,11 @@ class BenchApp
     @jobs = {}
     @started = 0
     @lock = Mutex.new
-    @static = Rack::Static.new(method(:route), urls: ASSETS, root: PUBLIC, header_rules: [[:all, {"cache-control" => "no-store"}]])
+    @assets = Assiette::AssetHandler.new(root: PUBLIC, additional_directory_mappings: {"/task_progress" => TaskProgress.js_path})
+    @app = Assiette::Server.new(method(:route), @assets)
   end
 
-  def call(env) = @static.call(env)
+  def call(env) = @app.call(env)
 
   def jobs = @lock.synchronize { @jobs.values }
 
@@ -38,7 +41,9 @@ class BenchApp
   def route(env)
     request = Rack::Request.new(env)
     case [request.request_method, request.path_info]
-    in ["GET", "/"] then [302, {"location" => "/index.html"}, []]
+    in ["GET", "/" | "/index.html"]
+      # The page links every asset by its content hash, so it must never be cached itself
+      [200, {"content-type" => "text/html; charset=utf-8", "cache-control" => "no-store"}, [PAGE.result(binding)]]
     in ["GET", "/scenarios"]
       json(Scenarios::ALL.map { {id: it.id, title: it.title, description: it.description} })
     in ["GET", "/jobs"]
@@ -70,6 +75,10 @@ class BenchApp
   end
 
   def find(id) = @lock.synchronize { @jobs[id] }
+
+  def asset_path(path) = @assets.absolute_asset_url_path(path)
+
+  def asset_integrity(path) = @assets.asset_integrity(path)
 
   def describe(job)
     root = job.root

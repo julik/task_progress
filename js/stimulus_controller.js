@@ -1,6 +1,6 @@
 import { Controller } from "@hotwired/stimulus"
-import { follow } from "/task_tree.js"
-import { rowView } from "/row_view.js"
+import { follow } from "./task_tree.js"
+import { rowView } from "./row_view.js"
 
 // Draws the tree from a TaskProgress SSE stream. Point it somewhere with the url value:
 //   <div data-controller="task-tree" data-task-tree-url-value="/jobs/abc/events"></div>

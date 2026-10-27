@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TaskProgress bench</title>
-  <link rel="stylesheet" href="/style.css">
-  <link rel="stylesheet" href="/bench.css">
+<% %w[/page.css /task_progress/task_tree.css /bench.css].each do |css| %>
+  <link rel="stylesheet" href="<%= asset_path(css) %>" integrity="<%= asset_integrity(css) %>" crossorigin="anonymous">
+<% end %>
   <script type="importmap">
     {
       "imports": {
@@ -16,7 +17,10 @@
       }
     }
   </script>
-  <script type="module" src="/bench.js"></script>
+<% @assets.js_modules.each do |mod| %>
+  <link rel="modulepreload" href="<%= asset_path(mod[:path]) %>" integrity="<%= mod[:integrity] %>" crossorigin="anonymous">
+<% end %>
+  <script type="module" src="<%= asset_path("/bench.js") %>" integrity="<%= asset_integrity("/bench.js") %>" crossorigin="anonymous"></script>
 </head>
 <body>
   <div class="bench">

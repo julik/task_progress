@@ -1,19 +1,12 @@
-:root {
+/* The rows of a task tree, as the Stimulus controller and the React component draw them.
+   The palette sits on :where(.tree), which weighs nothing - any selector of yours overrides it */
+:where(.tree) {
   --bg: #fbfaf7; --fg: #1d1d1b; --muted: #77756f; --line: #e6e3dc;
   --track: #ebe8e1; --fill: #2f6f4f; --fail: #b3261e; --stale: #a06a00;
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #161615; --fg: #ecebe6; --muted: #9a978f; --line: #2c2b29; --track: #2a2927; --fill: #5fb98c; --fail: #ff7a70; --stale: #e0a640; }
+  :where(.tree) { --bg: #161615; --fg: #ecebe6; --muted: #9a978f; --line: #2c2b29; --track: #2a2927; --fill: #5fb98c; --fail: #ff7a70; --stale: #e0a640; }
 }
-body { background: var(--bg); color: var(--fg); margin: 0; padding: 32px 16px; }
-main { max-width: 760px; margin: 0 auto; }
-h1 { font-size: 20px; margin: 0 0 4px; }
-p.lede { color: var(--muted); margin: 0 0 20px; }
-nav a { color: var(--fg); margin-right: 12px; }
-.controls { display: flex; gap: 8px; margin: 16px 0 24px; flex-wrap: wrap; }
-button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--fg); color: var(--bg); cursor: pointer; }
-button.secondary { background: transparent; color: var(--fg); }
 .tree { border-top: 1px solid var(--line); }
 /* Rows have one fixed height: every cell is a single line and the icon sits in a fixed box */
 .row { display: grid; grid-template-columns: minmax(0, 1fr) 140px 110px; gap: 12px; align-items: center; box-sizing: border-box; height: 35px; padding: 0; overflow: hidden; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 20px; }
@@ -33,5 +26,4 @@ button.secondary { background: transparent; color: var(--fg); }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 .icon > .spin { box-sizing: border-box; width: 11px; height: 11px; border: 2px solid var(--track); border-top-color: var(--fill); border-radius: 50%; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.empty { color: var(--muted); padding: 16px 0; }
-@media (max-width: 560px) { .row, .panes .row { grid-template-columns: minmax(0, 1fr) 80px; } .row .measure { display: none; } }
+@media (max-width: 560px) { .row { grid-template-columns: minmax(0, 1fr) 80px; } .row .measure { display: none; } }
