@@ -1,0 +1,20 @@
+# Generated from lib/task_progress/squasher.rb with RBS::Inline
+
+class TaskProgress
+  # Squashes runs of batches into one. It mirrors the tree they build, so for a run it can
+  # send the prunes it saw and then a put for every node the run touched - which lands any
+  # reader that had the tree up to the run's `prev` exactly where the run left it, times
+  # and all, without replaying the steps in between. What was said is not in the tree, so
+  # it goes along after the puts
+  class Squasher
+    @state: State
+
+    # Starts from an empty tree
+    # : () -> void
+    def initialize: () -> void
+
+    # One batch that lands a reader where the run of batches would have
+    # : (Array[Batch]) -> Batch
+    def squash: (Array[Batch]) -> Batch
+  end
+end

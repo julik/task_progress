@@ -1,0 +1,141 @@
+# Generated from lib/task_progress/state.rb with RBS::Inline
+
+class TaskProgress
+  # The tree as it stands after a run of events: what `apply` folds them into. It checks every
+  # event before it changes anything, so a bad one raises and leaves the state as it was. Not
+  # thread-safe on its own - the Log holds its lock around every apply
+  class State
+    # What an `open` or a `meta` may set
+    ATTRIBUTES: Array[Symbol]
+
+    CHILD_IDS: Integer
+
+    ENDINGS: Hash[Symbol, Symbol]
+
+    # What a `put` carries - a Node, less what never goes over the wire
+    FIELDS: Array[Symbol]
+
+    @nodes: Hash[path, Node]
+
+    # A new node, opened at `at`, before its attributes are set
+    # : (Float) -> Node
+    def self.blank_node: (Float) -> Node
+
+    # Folding the squash of a state gives that state back, which is what makes a squashed log
+    # interchangeable with the one it came from
+    # : (Array[Event], ?at: Float) -> State
+    def self.fold: (Array[Event], ?at: Float) -> State
+
+    # An empty tree - or one made of these nodes
+    # : (?Hash[path, Node]) -> void
+    def initialize: (?Hash[path, Node]) -> void
+
+    # The node at `path`, or nil
+    # : (path) -> Node?
+    def []: (path) -> Node?
+
+    # Whether there is a node at `path`
+    # : (path) -> bool
+    def key?: (path) -> bool
+
+    # Whether it has no root yet
+    # : () -> bool
+    def empty?: () -> bool
+
+    # How many nodes it has
+    # : () -> Integer
+    def size: () -> Integer
+
+    # The paths of the nodes directly under `path`
+    # : (path) -> Array[path]
+    def children: (path) -> Array[path]
+
+    # A path for a new child of `path`. A child is named by a random id rather than its position,
+    # so a pruned task's path never turns up again on another one - not after a prune here, nor
+    # when a restarted remote replaces its tree. Ids only have to differ between siblings, since
+    # the path tells cousins apart, and a draw that hits a sibling is drawn again
+    # : (path, Random) -> path
+    def new_child: (path, Random) -> path
+
+    # Pre-order, children in the order they opened - the order a renderer wants and the order
+    # puts replay in, so a reader rebuilding from a squash ends up with the same order
+    # : (?path) { (path, Node) -> void } -> void
+    # : (?path) -> Enumerator[[path, Node], void]
+    def each: (?path) { (path, Node) -> void } -> void
+            | (?path) -> Enumerator[[ path, Node ], void]
+
+    # Folds one event in, or raises ArgumentError and leaves the state as it was
+    # : (Event, at: Float, ?journal: Journal?) -> self
+    def apply: (Event, at: Float, ?journal: Journal?) -> self
+
+    # The tasks under `path` that have not ended, in pre-order - so reversed, every task comes
+    # before the one it is under. A mounted subtree is left out unless `mounts` - a remote that
+    # has not finished may yet, so a `done` from here would be a guess, but calling it off is not
+    # : (path, ?mounts: bool) -> Array[path]
+    def open_under: (path, ?mounts: bool) -> Array[path]
+
+    # The state as a list of puts, one per node, in pre-order - or just the subtree at `path`
+    # : (?path) -> Array[Event]
+    def squash: (?path) -> Array[Event]
+
+    # Done, and everything under it ended - each task by a `done`, `fail` or `cancel` of its own.
+    # Children that are all through do not finish their parent, which may have more to do after
+    # them; a failed or canceled one does not hold back a parent that went on to finish regardless
+    # : (?path, ?Node?) -> bool
+    def complete?: (?path, ?Node?) -> bool
+
+    # 0.0..1.0, unrounded. Children decide a parent's progress, by weight, and children it was
+    # told to expect but has not got yet count as zero. A leaf goes by its count when it has a
+    # total, and by its percent otherwise
+    # : (?path, ?Node?) -> Float
+    def fraction: (?path, ?Node?) -> Float
+
+    # A whole percent, and 100 only once everything under it is done: 99.5 does not round up
+    # into a bar that reads as finished while work is still running
+    # : (?path) -> Integer
+    def percent: (?path) -> Integer
+
+    # Every node, as a `put` carries it
+    # : () -> Hash[path, Hash[Symbol, untyped]]
+    def to_h: () -> Hash[path, Hash[Symbol, untyped]]
+
+    # A frozen copy, safe to read from any thread
+    # : () -> State
+    def snapshot: () -> State
+
+    # A copy that can change without changing this one
+    # : () -> State
+    def dup: () -> State
+
+    # Undoes what one transaction did
+    # : (Journal) -> void
+    def rollback: (Journal) -> void
+
+    private
+
+    # : (Node) -> Integer
+    def missing: (Node) -> Integer
+
+    # : (path) -> Node?
+    def parent_of!: (path) -> Node?
+
+    # : (path, Node?) -> Node
+    def existing!: (path, Node?) -> Node
+
+    # : (path, Node?) -> Node
+    def updatable!: (path, Node?) -> Node
+
+    # Work started anywhere starts everything above it too
+    # : (path, Float, Journal?) -> void
+    def start: (path, Float, Journal?) -> void
+
+    # : (Node, Hash[Symbol, untyped]) -> void
+    def assign: (Node, Hash[Symbol, untyped]) -> void
+
+    # : (path) -> path
+    def up: (path) -> path
+
+    # : (Node, path) -> void
+    def adopt: (Node, path) -> void
+  end
+end

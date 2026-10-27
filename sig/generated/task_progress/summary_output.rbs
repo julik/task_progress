@@ -1,0 +1,19 @@
+# Generated from lib/task_progress/summary_output.rb with RBS::Inline
+
+class TaskProgress
+  # The tree boiled down to the root's percent and the latest thing said, for a progress
+  # column in a database or a single status line. A batch that changes neither is not passed on
+  class SummaryOutput
+    @block: ^(percent: Integer, message: String?) -> void
+
+    @percent: Integer
+
+    # Calls the block with `percent:` and `message:` whenever either changes
+    # : () { (percent: Integer, message: String?) -> void } -> void
+    def initialize: () { (percent: Integer, message: String?) -> void } -> void
+
+    # Takes one batch, see Log#add_output
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+  end
+end

@@ -1,0 +1,116 @@
+# Generated from lib/task_progress/log.rb with RBS::Inline
+
+class TaskProgress
+  # The sequencer. Every change to a tree goes through `transaction`, which applies its events
+  # under the one lock and commits them as a numbered Batch - so the lock is what puts the
+  # changes from many threads into one order, and a batch is what crosses a process, a Ractor
+  # or the wire as one piece.
+  #
+  # Outputs get the batches strictly in order, but outside that lock: a worker never waits on
+  # another's output while it holds the tree. Delivery is synchronous to whoever committed, so
+  # a slow output slows its committer down - wrap it in BufferedOutput when it must not
+  class Log
+    # The id its batches carry - ten lower case characters, unless given
+    attr_reader id: String
+
+    # The seq of the last batch it committed
+    attr_reader seq: Integer
+
+    # Lower case only, like the task ids, so neither can clash with another on a filesystem that
+    # ignores case (macOS, Windows) should one ever end up in a file name
+    ID_CHARS: Array[String]
+
+    @on_output_error: ^(Exception, untyped) -> void
+
+    @on_cancel: Hash[path, Array[^(String?) -> void]]
+
+    @snapshot: [ Integer, State ]?
+
+    @outbox: Array[[ Batch, Array[output] ]]
+
+    @outputs: Array[output]
+
+    @state: State
+
+    @delivery: Thread::Mutex
+
+    @lock: Thread::Mutex
+
+    @random: Random
+
+    @clock: ^() -> Float
+
+    # An empty log. `clock` gives the time to stamp batches with, and `random` draws task ids - both for tests to pin down
+    # : (?id: String | Symbol, ?clock: ^() -> Float, ?random: Random) -> void
+    def initialize: (?id: String | Symbol, ?clock: ^() -> Float, ?random: Random) -> void
+
+    # Hears about an output that raised, with the error and the output; it warns by default
+    attr_writer on_output_error: ^(Exception, untyped) -> void
+
+    # Runs the block under the lock, collecting what it adds with `tx.<<`; it commits as one
+    # batch, or not at all if the block raises. A transaction opened inside another one on the
+    # same fiber joins it. The block holds the lock throughout - keep it short, and never wait
+    # in it on another thread that writes to this log
+    # : [T] () { (Transaction) -> T } -> T
+    def transaction: [T] () { (Transaction) -> T } -> T
+
+    # Commits the events as one batch
+    # : (*Event) -> void
+    def append: (*Event) -> void
+
+    # An output is anything with `call(batch, log)`. Unless `replay: false`, it first gets the
+    # tree so far as one squashed batch, `prev` 0, and then every batch after it. With a `path`
+    # it gets only that subtree, as a tree of its own - see Branch
+    # : (?output?, ?replay: bool, ?path: path) ?{ (Batch, Log) -> void } -> output
+    def add_output: (?output?, ?replay: bool, ?path: path) ?{ (Batch, Log) -> void } -> output
+
+    # Takes the output as it was given to `add_output`
+    # : (output) -> void
+    def remove_output: (output) -> void
+
+    # Calls the block with the reason once the task at `path` is canceled - at once, if it already
+    # was. A task that ends any other way drops it. The block runs on whichever thread delivers
+    # the cancel, after it has been committed: keep it short, and let it unblock the work (close a
+    # connection, raise into a thread) rather than do the work
+    # : (path) { (String?) -> void } -> void
+    def on_cancel: (path) { (String?) -> void } -> void
+
+    # A frozen copy of the tree, safe to read from anywhere - and from inside an output too,
+    # since outputs run outside the lock
+    # : () -> State
+    def snapshot: () -> State
+
+    # The tree so far as one batch of puts - what a late reader starts from. With a `path`, the
+    # subtree there, rooted at `[]` the way a Branch would send it
+    # : (?path) -> Batch
+    def squashed: (?path) -> Batch
+
+    # Its id and seq
+    # : () -> String
+    def inspect: () -> String
+
+    private
+
+    # : () -> Transaction?
+    def current: () -> Transaction?
+
+    # Thread#[] is fiber-local and, unlike Fiber storage, a new thread or fiber does not inherit
+    # it - which is what we want, since only the fiber that took the lock may join
+    # : (Transaction?) -> void
+    def current=: (Transaction?) -> void
+
+    # : (Batch) -> void
+    def call_cancel_callbacks: (Batch) -> void
+
+    # : (Transaction) -> void
+    def commit_locked: (Transaction) -> void
+
+    # One deliverer at a time, taking the outbox in order. A commit made from inside an output
+    # finds its own fiber already delivering, and leaves its batch for the loop it is inside of
+    #
+    # Each batch goes to all its outputs with interrupts held off, so one can never reach some
+    # outputs and not others. An interrupt waits for the batch in hand, not for the whole outbox
+    # : () -> void
+    def deliver: () -> void
+  end
+end

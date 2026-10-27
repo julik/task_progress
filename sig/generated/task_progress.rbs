@@ -1,0 +1,379 @@
+# Generated from lib/task_progress.rb with RBS::Inline
+
+# Hierarchical progress for task trees. A TaskProgress is a handle onto one node of a tree; the
+# tree itself is a Log of change events, applied and numbered under one lock, which outputs
+# receive in order - to draw a terminal, write to a pipe, stream to a browser, or feed a Mount
+# that grafts the tree under a node of a tree in another process.
+#
+#     TaskProgress.cli("Import") do |root|
+#       root.subtask("Download", unit: "bytes") { |t| t.track_io(io) ... }
+#       root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
+#     end
+class TaskProgress
+  # A task's place in the tree: its ancestors' ids, then its own - `[]` is the root
+  type path = Array[String]
+
+  # Anything that takes the batches a log commits, in order - a lambda will do
+  interface _Output
+    def call: (Batch batch, Log log) -> void
+  end
+
+  type output = Object & _Output
+
+  PARTS: String
+
+  # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
+  # constructor (Data#initialize, say) while Ractors run brings the process down, sometimes
+  # minutes later and in unrelated code. Ruby 4.0 has it fixed, and the Ractor::Port API with it
+  RACTORS: bool
+
+  # Loads every part now rather than on first use - before forking workers, say, so they share
+  # the loaded code. TrackedIO is left out when the progressive_io gem is not there
+  # : () -> singleton(TaskProgress)
+  def self.eager_load!: () -> singleton(TaskProgress)
+
+  # Raised at whoever works on a task that was called off, so the work stops at its next step.
+  # An Exception rather than a StandardError, like Interrupt: a `rescue => e` around one step
+  # should not swallow it and carry on with the next
+  class Canceled < Exception
+    # The task that was called off
+    attr_reader task: TaskProgress
+
+    # For the task that was called off, and what it is called
+    # : (TaskProgress, ?String) -> void
+    def initialize: (TaskProgress, ?String) -> void
+  end
+
+  # The log the task's tree lives in
+  attr_reader log: Log
+
+  # The task's place in the tree - `[]` for the root
+  attr_reader path: path
+
+  ROOT: path
+
+  # A root reporting wherever suits a command-line program: a parent process, when it handed
+  # one down in TASK_PROGRESS_FD; a redrawn tree on a terminal; an ExecutionLog on CI or when
+  # piped. With a block, it runs the block as the root's work and returns its value
+  # : (?String, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
+  # : [T] (?String, ?io: IO | StringIO, ?quiet: bool, **untyped) { (TaskProgress) -> T } -> T?
+  def self.cli: (?String, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
+              | [T] (?String, ?io: IO | StringIO, ?quiet: bool, **untyped) { (TaskProgress) -> T } -> T?
+
+  # The output `cli` and `bar` pick for where the program runs, or nil when `quiet`
+  # : (io: IO | StringIO, quiet: bool) -> output?
+  def self.cli_output: (io: IO | StringIO, quiet: bool) -> output?
+
+  # A single bar, the way progress bars always worked: no block, and it finishes by itself once
+  # its count reaches `total`. Without a total it counts and spins. The last frame is drawn at
+  # exit, finished or not
+  #
+  #     bar = TaskProgress.bar("Importing", total: rows.size)
+  #     rows.each { import(it) && bar.tick! }
+  # : (?String, ?total: Integer?, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
+  def self.bar: (?String, ?total: Integer?, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
+
+  # A root nobody runs a block for is finished when the program ends: done if it ends well,
+  # failed with the error if it is going down with one
+  # : (TaskProgress, output?) -> TaskProgress
+  def self.finish_at_exit: (TaskProgress, output?) -> TaskProgress
+
+  # Outputs that hold a thread or a screen - TerminalOutput, ExecutionLogOutput, BufferedOutput -
+  # can be closed, to draw their last and stop
+  # : (output?) -> void
+  def self.close: (output?) -> void
+
+  # A bar over a collection, see `bar` and `iterate`
+  #
+  #     TaskProgress.iterate(rows, "Importing") { |row| import(row) }
+  # : (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
+  def self.iterate: (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
+
+  # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
+  # : (untyped) -> Integer?
+  def self.size_of: (untyped) -> Integer?
+
+  # Where the browser client lives: `task_tree.js` (the fold, and `follow` for an SSE stream),
+  # `render_queue.js`, `row_view.js`, a Stimulus controller, a React component and
+  # `task_tree.css`. No build step - serve the directory as it is, under any prefix
+  # : () -> String
+  def self.js_path: () -> String
+
+  # A silent root, for a library's default
+  # : (?String) -> TaskProgress
+  def self.null: (?String) -> TaskProgress
+
+  # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
+  # and `message:` as the tree changes. See `subtask` for `autofinish`
+  # : (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) ?{ (percent: Integer, message: String?) -> void } -> void
+  def initialize: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) ?{ (percent: Integer, message: String?) -> void } -> void
+
+  # The attributes an `open` carries, without what is at its default
+  # : (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool) -> Hash[Symbol, untyped]
+  def self.attributes: (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool) -> Hash[Symbol, untyped]
+
+  # A handle on the task at `path` in `log`, without opening anything
+  # : (Log, path) -> TaskProgress
+  def self.handle: (Log, path) -> TaskProgress
+
+  # The task as the tree holds it now - frozen, and safe to read from any thread
+  # : () -> Node
+  def node: () -> Node
+
+  # What it is called
+  # : () -> String
+  def name: () -> String
+
+  # `:pending`, `:active`, `:done`, `:failed` or `:canceled`
+  # : () -> Symbol
+  def status: () -> Symbol
+
+  # A whole percent, 100 only once it and everything under it are done
+  # : () -> Integer
+  def percent: () -> Integer
+
+  # How far along, 0.0..1.0, unrounded
+  # : () -> Float
+  def fraction: () -> Float
+
+  # The latest thing it said, see `note`
+  # : () -> String?
+  def message: () -> String?
+
+  # What it failed with: `class`, `message`, `backtrace` and `cause`, see `fail!`
+  # : () -> Hash[Symbol, untyped]?
+  def error: () -> Hash[Symbol, untyped]?
+
+  # How many it has counted, see `advance!`
+  # : () -> Integer
+  def count: () -> Integer
+
+  # How many it counts to, or nil when it has no total
+  # : () -> Integer?
+  def total: () -> Integer?
+
+  # Done, and everything under it ended
+  # : () -> bool
+  def done?: () -> bool
+
+  # Ended by `fail!`
+  # : () -> bool
+  def failed?: () -> bool
+
+  # Ended by `cancel!`, or by a task above it being canceled
+  # : () -> bool
+  def canceled?: () -> bool
+
+  # Whether a reader may offer to call it off, and it has not ended yet
+  # : () -> bool
+  def cancelable?: () -> bool
+
+  # The task at `path` under this one - an Array of ids, or the ids joined with a dash, the way
+  # the browser client keys its rows (`x3k0-00af`) - or nil
+  # : (path | String) -> TaskProgress?
+  def find: (path | String) -> TaskProgress?
+
+  # Ended, by `done!`, `fail!` or `cancel!` - whether or not everything under it did
+  # : () -> bool
+  def finished?: () -> bool
+
+  # The task it is under, or nil for the root
+  # : () -> TaskProgress?
+  def parent: () -> TaskProgress?
+
+  # The root of its tree
+  # : () -> TaskProgress
+  def root: () -> TaskProgress
+
+  # The tasks directly under it, in the order they opened
+  # : () -> Array[TaskProgress]
+  def subtasks: () -> Array[TaskProgress]
+
+  # Sends this task's subtree to an output, as a tree of its own rooted at `[]` - for the root
+  # that is the whole tree. See Log#add_output
+  # : (?output?, ?replay: bool) ?{ (Batch, Log) -> void } -> output
+  def add_output: (?output?, ?replay: bool) ?{ (Batch, Log) -> void } -> output
+
+  # Stops sending to an output, as it was given to `add_output`
+  # : (output) -> void
+  def remove_output: (output) -> void
+
+  # A child task. `total:` makes it counted (drive it with `advance!`), `indeterminate: true`
+  # one with no measure of its own, and `weight:` how much of the parent it is. With a block
+  # it runs the block as the child's work, see `run`, and returns the block's value.
+  #
+  # A counted task is done once its count reaches its total. Give it `autofinish: false` when
+  # the total is a guess, and the work may go past it.
+  #
+  # `cancelable: true` tells whoever draws the tree that it may offer to call the task off - see
+  # `find` and `cancel!` for taking that request back
+  # : (String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) -> TaskProgress
+  # : [T] (String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) { (TaskProgress) -> T } -> T?
+  def subtask: (String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) -> TaskProgress
+             | [T] (String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) { (TaskProgress) -> T } -> T?
+
+  # Runs the block as this task's work: done when it returns, failed with the error when it
+  # raises - an Interrupt or a SignalException included - and the error raised on. A task
+  # canceled ends its work quietly: `run` returns nil
+  # : [T] () { (TaskProgress) -> T } -> T?
+  def run: [T] () { (TaskProgress) -> T } -> T?
+
+  # Moves the percent; 100 finishes the task
+  # : (percent: Integer | Float, ?message: String?) -> self
+  def update_to: (percent: Integer | Float, ?message: String?) -> self
+
+  # Adds to the count - finishing the task, if that reaches its total
+  # : (?Integer, ?message: String?) -> self
+  def advance!: (?Integer, ?message: String?) -> self
+
+  # Adds one to the count, see `advance!`
+  # : (?message: String?) -> self
+  def tick!: (?message: String?) -> self
+
+  # Goes through a collection a step per item. Given a name it opens a subtask for it, and
+  # otherwise counts on this task. The total comes from `size`, never `count` - so a lazy
+  # enumerator stays lazy, and one with no size just counts. Done when the loop ends, failed
+  # with the error if the block raises. Without a block it returns an Enumerator, which does
+  # the same as it is consumed
+  #
+  #     root.iterate(files, "Files") { |file| copy(file) }
+  #     root.iterate(rows, "Rows").map { transform(it) }
+  # : (Enumerable[untyped], ?String?, ?total: Integer?, ?step: Integer) ?{ (untyped) -> untyped } -> untyped
+  def iterate: (Enumerable[untyped], ?String?, ?total: Integer?, ?step: Integer) ?{ (untyped) -> untyped } -> untyped
+
+  # Prints a line above the tree, where it stays. It changes nothing in the tree itself, so a
+  # reader joining later never sees it - like anything said on a terminal
+  # : (_ToS) -> self
+  def puts: (_ToS) -> self
+
+  # The latest thing it says, shown on its row
+  # : (String?) -> self
+  def note: (String?) -> self
+
+  # Changes what it counts to
+  # : (Integer?) -> void
+  def total=: (Integer?) -> void
+
+  # Renames it
+  # : (String) -> void
+  def name=: (String) -> void
+
+  # Finishes the task, and with it every task under it still open - each with a `done` of its
+  # own, deepest first, in the same batch. The work they were part of is over, and a reader
+  # should not be left waiting on a task nobody will ever finish. What was mounted is left to
+  # its Mount
+  # : (?String?) -> self
+  def done!: (?String?) -> self
+
+  # Fails the task with an exception, a message, or nothing. `extra` goes along with the
+  # error, booleans and integers only - a reader drops the rest
+  #
+  # What is still open under it is canceled: it did not fail, it was cut short
+  # : (?(Exception | String)?, **bool | Integer) -> self
+  def fail!: (?(Exception | String)?, **bool | Integer) -> self
+
+  # Calls the task off, and every task still open under it, each with a `cancel` of its own -
+  # from any thread. Whoever works on one of them next gets a Canceled, which `run` takes as
+  # the end of that task's work. Canceling a finished task does nothing
+  # : (?String?) -> self
+  def cancel!: (?String?) -> self
+
+  # Calls the block with the reason once this task is canceled, see Log#on_cancel. For work that
+  # blocks and so would not notice a cancel until it next touches its task:
+  #
+  #     rows.on_cancel { http.finish }
+  # : () { (String?) -> void } -> self
+  def on_cancel: () { (String?) -> void } -> self
+
+  # Asks for the task at `path` under this one to be canceled - the way a request from outside
+  # (a browser, a parent process) comes in. Everything is decided in one transaction against the
+  # tree as it stands, so it cannot race the task finishing. Returns:
+  #
+  #     :canceled   it was, along with everything still open under it
+  #     :forwarded  it lives in a mounted child, which was asked; its cancel comes back up the stream
+  #     :moot       there is nothing left to cancel - no such task, or it has already ended
+  #     :refused    it is not cancelable
+  #
+  # A request that comes too late is moot, not an error: by the time it arrives the task may well
+  # have finished, and its process exited
+  # : (path | String, ?String?) -> Symbol
+  def request_cancel: (path | String, ?String?) -> Symbol
+
+  # Reads cancel requests off an IO - one JSON line each, `{"cancel": [ids], "reason": "..."}` -
+  # on a thread of its own, and hands them to `request_cancel`. This is the far end of a Mount's
+  # control pipe; anything malformed is skipped. Returns the thread, which ends at EOF.
+  #
+  # The root itself, `[]`, is what the parent mounted, and only the parent asks for it: the
+  # mount was ended there, so the root is canceled whether it is cancelable or not
+  # : (IO) -> Thread
+  def accept_cancel_requests: (IO) -> Thread
+
+  # Every task called off carries the reason, so each of them can say why it stopped
+  # : (Transaction, path, String?) -> void
+  def self.cancel_in: (Transaction, path, String?) -> void
+
+  # Everything the block does to the tree lands as one batch, or none of it does
+  # : [T] () { (TaskProgress) -> T } -> T
+  def transaction: [T] () { (TaskProgress) -> T } -> T
+
+  # A child whose subtree is fed from elsewhere - a subprocess, a Ractor, a stream. Only the
+  # Mount writes under it, see Mount
+  # : (String, ?weight: (Integer | Float)?, ?cancelable: bool) -> Mount
+  def mount: (String, ?weight: (Integer | Float)?, ?cancelable: bool) -> Mount
+
+  # Wraps an IO so that reading it advances this task by the bytes read, see TrackedIO. The total
+  # is the IO's size unless given; with neither, the task counts bytes with no measure. With a
+  # block, the block runs with the wrapped IO as this task's work, see `run`. Needs the
+  # progressive_io gem, and an IO that can tell its position - for a pipe or a socket, call
+  # `advance!` with each chunk instead
+  # : (untyped, ?total: Integer?, ?step: Integer?) -> TrackedIO
+  # : [T] (untyped, ?total: Integer?, ?step: Integer?) { (TrackedIO) -> T } -> T?
+  def track_io: (untyped, ?total: Integer?, ?step: Integer?) -> TrackedIO
+              | [T] (untyped, ?total: Integer?, ?step: Integer?) { (TrackedIO) -> T } -> T?
+
+  # The same task in the same tree
+  # : (untyped) -> bool
+  def ==: (untyped) -> bool
+
+  # Equal handles hash alike, so a task works as a Hash key
+  # : () -> Integer
+  def hash: () -> Integer
+
+  # Its path, name and status
+  # : () -> String
+  def inspect: () -> String
+
+  SCALE: Array[[ String, Integer ]]
+
+  # "4.2s", "3m07s", "2h15m"
+  # : (Integer | Float) -> String
+  def self.duration: (Integer | Float) -> String
+
+  # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
+  # : (Integer | Float) -> String
+  def self.human_bytes: (Integer | Float) -> String
+
+  # Every message reaches the tree as valid UTF-8. Messages often name files, and a raw
+  # ZIP read hands those back tagged ASCII-8BIT, so a "Reading Alice’s.xhtml" would
+  # otherwise blow up whatever an output writes to (a database column, a UTF-8 log line)
+  # : (nil) -> nil
+  # : (untyped) -> String
+  def self.utf8: (nil) -> nil
+               | (untyped) -> String
+
+  private
+
+  # : (**untyped) -> self
+  def meta: (**untyped) -> self
+
+  # Finishing a finished task is a no-op; anything else on one raises, as does writing under
+  # a mount from here
+  # : (Transaction, ?finishing: bool) -> bool
+  def writable!: (Transaction, ?finishing: bool) -> bool
+
+  # : (State, ?above: bool) -> bool
+  def sealed?: (State, ?above: bool) -> bool
+
+  # : (untyped) -> bool
+  def positioned?: (untyped) -> bool
+end

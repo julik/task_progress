@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# rbs_inline: enabled
 
 class TaskProgress
   # `rows.each.with_progress("Importing") { }`, for the files that ask for it with
@@ -6,7 +7,8 @@ class TaskProgress
   # Enumerable changes. See TaskProgress.iterate
   module Refinements
     refine Enumerable do
-      def with_progress(name = File.basename($PROGRAM_NAME), **, &) = TaskProgress.iterate(self, name, **, &)
+      #: (?String, **untyped) ?{ (untyped) -> untyped } -> untyped
+      def with_progress(name = File.basename($PROGRAM_NAME), **, &) = TaskProgress.iterate(_ = self, name, **, &)
     end
   end
 end

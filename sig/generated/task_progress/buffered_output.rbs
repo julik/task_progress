@@ -1,0 +1,38 @@
+# Generated from lib/task_progress/buffered_output.rb with RBS::Inline
+
+class TaskProgress
+  # Puts a thread between the log and a slow output. The first batch goes through at once,
+  # and whatever piles up while the output works (or during `interval` after it) goes out
+  # squashed into one - so a database write a few times a second keeps up with any number of
+  # workers, and never holds one of them up
+  class BufferedOutput
+    @output: output
+
+    @interval: Integer | Float
+
+    @queue: Thread::Queue[Batch]
+
+    @log: Log?
+
+    @squasher: Squasher
+
+    @thread: Thread
+
+    # For the slow output, sending to it at most every `interval` seconds
+    # : (output, ?interval: Integer | Float) -> void
+    def initialize: (output, ?interval: Integer | Float) -> void
+
+    # Takes one batch, to deliver from its own thread
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+
+    # Delivers what is still queued, then stops
+    # : () -> void
+    def close: () -> void
+
+    private
+
+    # : () -> void
+    def run: () -> void
+  end
+end

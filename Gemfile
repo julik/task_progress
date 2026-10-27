@@ -12,6 +12,14 @@ group :examples do
   gem "rackup"
 end
 
+group :development do
+  # Types live inline, as RBS comments next to the code; rbs-inline writes them out to sig/, and
+  # Steep checks the code against them
+  gem "rbs-inline", require: false
+  gem "steep", require: false
+  gem "rdoc", require: false
+end
+
 group :test do
   # The browser tests drive the bench in a headless Chrome; without one they skip
   gem "ferrum", "~> 0.17"

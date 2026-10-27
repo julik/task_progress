@@ -1,0 +1,133 @@
+# Generated from lib/task_progress/mount.rb with RBS::Inline
+
+class TaskProgress
+  # Grafts a tree that lives elsewhere under one node of this one. The remote root lands on the
+  # mount node itself and its `["x3k0"]` on `[*mount, "x3k0"]`, so mounting is prefixing, and
+  # a relay through several processes prefixes once per hop.
+  #
+  # The mount node is sealed: only its Mount writes under it, so a remote can never touch a
+  # node outside its prefix - nor rename or reweigh the mount, which stay the parent's to set.
+  # Each remote batch is re-committed here as one batch, or dropped whole if it does not apply.
+  # A batch that does not follow the last one (a gap) marks the subtree stale, and it stays so
+  # until a batch with `prev` 0 replaces it whole
+  class Mount
+    # The log the mount node lives in
+    attr_reader log: Log
+
+    # The mount node
+    attr_reader path: path
+
+    # The seq of the remote's last batch it applied
+    attr_reader last_seq: Integer?
+
+    @reaped: bool
+
+    @controlled: bool
+
+    @remote_ended: bool
+
+    @stale: bool
+
+    @source: String?
+
+    @pid_lock: Thread::Mutex
+
+    @control_lock: Thread::Mutex
+
+    @control: IO?
+
+    # For the node at `path` - see TaskProgress#mount, which opens one
+    # : (Log, path) -> void
+    def initialize: (Log, path) -> void
+
+    # The mount node, as a task of this tree
+    # : () -> TaskProgress
+    def task: () -> TaskProgress
+
+    # Whether a batch went missing, and the subtree waits for a fresh squash
+    # : () -> bool
+    def stale?: () -> bool
+
+    # Takes a Batch, its Hash form, or a line of NDJSON. Returns :applied, :gap, :rejected, or
+    # :duplicate for one already applied - redelivery is ordinary after a reconnect or a replay
+    # : (Batch | Hash[untyped, untyped] | String) -> (:applied | :gap | :rejected | :duplicate)
+    def <<: (Batch | Hash[untyped, untyped] | String) -> (:applied | :gap | :rejected | :duplicate)
+
+    # Reads NDJSON batches off an IO until EOF
+    # : (IO) -> self
+    def follow: (IO) -> self
+
+    # Runs a command with TASK_PROGRESS_FD pointing at a pipe, follows it until it exits, and
+    # returns its Process::Status. A child that exits without finishing its root fails the mount.
+    #
+    # A second pipe, TASK_PROGRESS_CONTROL_FD, carries cancel requests the other way, so tasks in
+    # the child can be canceled from here - see #request_cancel; TaskProgress.cli reads it. When
+    # the mount itself is canceled, the child is asked to cancel its root, and is sent TERM if it
+    # is still running `grace` seconds later. Interrupted (Ctrl-C, a timeout), it terminates the
+    # child at once
+    # : (*untyped command, ?grace: Integer | Float, **untyped options) -> Process::Status?
+    def spawn: (*untyped command, ?grace: Integer | Float, **untyped options) -> Process::Status?
+
+    # Passes a cancel request on to the child, for the task at `path` in its own tree. Returns
+    # :forwarded, or :moot when there is no child to ask any more - it has exited, or this mount
+    # was never spawned. Whether the child cancels anything shows up the stream, if it does
+    # : (path, ?String?) -> (:forwarded | :moot)
+    def request_cancel: (path, ?String?) -> (:forwarded | :moot)
+
+    # The parent may still end the subtree - when the remote went away, say
+    # : () -> self
+    def done!: () -> self
+
+    # Fails the mount, and cancels what the remote left open under it
+    # : (?(Exception | String)?, **bool | Integer) -> self
+    def fail!: (?(Exception | String)?, **bool | Integer) -> self
+
+    # Cancels the mount, and what the remote left open under it
+    # : (?String?) -> self
+    def cancel!: (?String?) -> self
+
+    # Whether the mount node has ended
+    # : () -> bool
+    def finished?: () -> bool
+
+    private
+
+    # Ending the mount ends what the remote left open under it too, as Task#done! and #fail! do
+    # : (Symbol) { (Transaction) -> void } -> self
+    def finish: (Symbol) { (Transaction) -> void } -> self
+
+    # : (Batch | Hash[untyped, untyped] | String) -> Batch?
+    def coerce: (Batch | Hash[untyped, untyped] | String) -> Batch?
+
+    # : () -> void
+    def mark_stale: () -> void
+
+    # The remote's events, moved under the mount - or nil if one would land too deep
+    # : (Array[Event], Float) -> Array[Event]?
+    def translate: (Array[Event], Float) -> Array[Event]?
+
+    # Asks the child to cancel its root, and sends TERM if it has not exited `grace` seconds on
+    # : (Integer, Integer | Float) -> void
+    def stop: (Integer, Integer | Float) -> void
+
+    # The pid is only ever signaled while it is still ours: reaping and signaling share a lock, so
+    # a signal can never reach another process that was given the pid after ours exited
+    # : (Integer, Symbol) -> void
+    def signal: (Integer, Symbol) -> void
+
+    # : (Integer) -> Process::Status?
+    def reap: (Integer) -> Process::Status?
+
+    TIMES: Array[Symbol]
+
+    ENDINGS: Array[Symbol]
+
+    FINISHED: Array[Symbol]
+
+    # : (Hash[Symbol, untyped], Float) -> Hash[Symbol, untyped]
+    def rebased: (Hash[Symbol, untyped], Float) -> Hash[Symbol, untyped]
+
+    # : (Hash[Symbol, untyped]) -> Hash[Symbol, untyped]
+    def own_put: (Hash[Symbol, untyped]) -> Hash[Symbol, untyped]
+  end
+end

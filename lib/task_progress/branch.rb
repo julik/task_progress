@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# rbs_inline: enabled
 
 class TaskProgress
   # An output for one subtree, which it sees as a tree of its own: the branch's node becomes the
@@ -11,10 +12,22 @@ class TaskProgress
   # Pruning an ancestor takes the branch's node away for good, since a pruned path is never
   # given out again. The branch then sends one last reset with nothing in it, and falls silent
   class Branch
-    attr_reader :output, :path, :id
+    # The output the branch feeds
+    attr_reader :output #: output
+    # The branch's task, in the whole tree
+    attr_reader :path #: path
+    # The log id its batches carry: the log's, with the path appended
+    attr_reader :id #: String
 
+    # @rbs @seq: Integer
+    # @rbs @gone: bool
+
+    # The log id of the branch at `path`
+    #: (String, path) -> String
     def self.id(log_id, path) = [log_id, *path].join("-")
 
+    # For an output, the branch at `path` of the log `log_id`, numbering on from `seq`
+    #: (output, path, String, Integer) -> void
     def initialize(output, path, log_id, seq)
       @output = output
       @path = path
@@ -23,10 +36,12 @@ class TaskProgress
       @gone = false
     end
 
+    # Passes on what of the batch is in the branch, moved to its root
+    #: (Batch, Log) -> void
     def call(batch, log)
       return if @gone
       reset = batch.reset?
-      events = []
+      events = [] #: Array[Event]
       batch.events.each do |event|
         if event.op == :prune && event.path.length < @path.length && @path[0, event.path.length] == event.path
           @gone = reset = true

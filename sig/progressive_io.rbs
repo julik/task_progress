@@ -1,0 +1,11 @@
+# progressive_io ships no types - this is the part of it TrackedIO uses
+class ProgressiveIO
+  def initialize: (untyped io) { (Integer pos) -> void } -> void
+  def readpartial: (*untyped, **untyped) -> untyped
+  def read_nonblock: (*untyped, **untyped) -> untyped
+  def sysread: (*untyped, **untyped) -> untyped
+
+  private
+
+  def notify_read: (*untyped, **untyped) -> void
+end

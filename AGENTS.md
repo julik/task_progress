@@ -19,6 +19,15 @@
 
 A change to the wire format touches `Wire` (what a reader accepts), `js/task_tree.js`, and the op table in the MANUAL.
 
+## Types and docs
+
+The type annotations, the type checks and the docs are part of the code, and are kept up to date with it - in the same commit as the change, never after.
+
+- Every method, attribute, constant and instance variable has an inline RBS type: a `#: (Arg) -> Return` line right above a `def`, `#: Type` after an `attr_reader` or a constant, and `# @rbs @ivar: Type` in the class body. A `Data.define` or `Struct.new` gets typed members, with its methods in a `class` body that reopens it.
+- Every public class, method, attribute and constant has a doc comment above it, in Markdown - RDoc reads it with `markup: markdown`, and shows the `#:` line as the method's signature. Say what it is for and anything surprising; leave the types to the `#:` line.
+- `bundle exec rake types` writes the types out to `sig/generated` and checks the code against them with Steep; commit `sig/generated` with the change. `bundle exec rake doc:check` fails unless everything public is documented. CI runs both, and fails if `sig/generated` is out of date.
+- What RBS itself lacks - a core method without its block, a gem without types - goes in `sig/patches.rbs` or a file of its own in `sig/`, never in `sig/generated`.
+
 ## JS
 
 `js/` ships in the gem: plain ES modules, no build step, relative imports inside the directory, and bare names (`@hotwired/stimulus`, `react`, `react-dom/client`, `htm`) for what the host page's import map provides. Rows keep one fixed height.

@@ -1,0 +1,17 @@
+# Generated from lib/task_progress/ractor_output.rb with RBS::Inline
+
+class TaskProgress
+  # Sends each batch to a Ractor::Port, as a deep frozen copy - for a tree built inside a
+  # Ractor and mounted outside it: `mount << port.receive`. Ruby 4.0 and up only
+  class RactorOutput
+    @port: untyped
+
+    # Sends to a `Ractor::Port`. Raises NotImplementedError before Ruby 4.0
+    # : (untyped) -> void
+    def initialize: (untyped) -> void
+
+    # Sends a deep frozen copy of the batch to the port
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+  end
+end

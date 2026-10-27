@@ -1,0 +1,113 @@
+# Generated from lib/task_progress/terminal_output.rb with RBS::Inline
+
+class TaskProgress
+  # Redraws the tree in place on a terminal, from a ticker thread of its own so spinners turn
+  # while nothing reports. A finished subtree folds into its one line, and when the tree is
+  # taller than the screen the finished lines go first, then the ones not started. When the
+  # root finishes the tree is drawn one last time and left on screen - or erased, with `erase: true`.
+  # A line a task `puts` goes above the tree and stays there
+  #
+  # With `interval: nil` there is no thread and every batch redraws, which is what tests want
+  class TerminalOutput
+    SPINNER: Array[String]
+
+    BAR: Integer
+
+    DEFAULT_SIZE: [ Integer, Integer ]
+
+    @dirty: bool
+
+    @ticker: Thread?
+
+    @closed: bool
+
+    @log: Log?
+
+    @frame: Integer
+
+    @drawn: Integer
+
+    @lock: Thread::Mutex
+
+    @clock: ^() -> Float
+
+    @erase: bool
+
+    @interval: (Integer | Float)?
+
+    @io: IO | StringIO
+
+    # Draws on `io` every `interval` seconds - or on every batch, with `interval: nil`. With `erase: true` the tree is cleared once the root finishes
+    # : (?IO | StringIO, ?interval: (Integer | Float)?, ?erase: bool, ?clock: ^() -> Float) -> void
+    def initialize: (?IO | StringIO, ?interval: (Integer | Float)?, ?erase: bool, ?clock: ^() -> Float) -> void
+
+    # Takes one batch, see Log#add_output
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+
+    # Draws the tree one last time and stops the ticker
+    # : () -> void
+    def close: () -> void
+
+    # The lines for a snapshot, without the terminal control around them
+    # : (State, ?width: Integer, ?height: Integer) -> Array[String]
+    def lines: (State, ?width: Integer, ?height: Integer) -> Array[String]
+
+    private
+
+    # : () -> void
+    def tick: () -> void
+
+    # : () -> void
+    def finish: () -> void
+
+    # : () -> void
+    def draw: () -> void
+
+    # : (Array[String]) -> void
+    def print_above: (Array[String]) -> void
+
+    # : () -> void
+    def clear: () -> void
+
+    # : () -> String
+    def up: () -> String
+
+    # Under a finished node only what failed shows, so a failure leaves the way down to it
+    # : (State, path) -> bool
+    def hidden?: (State, path) -> bool
+
+    # What fits in `room` lines - the last of them saying how many more there are
+    # : (Array[[path?, Node | Integer]], Integer) -> Array[[path?, Node | Integer]]
+    def trim: (Array[[ path?, Node | Integer ]], Integer) -> Array[[ path?, Node | Integer ]]
+
+    # : (State, path?, Node | Integer, Integer) -> String
+    def line: (State, path?, Node | Integer, Integer) -> String
+
+    # : (Node) -> String
+    def icon: (Node) -> String
+
+    # : (State, path, Node) -> String?
+    def measure: (State, path, Node) -> String?
+
+    # : (Integer) -> String
+    def bar: (Integer) -> String
+
+    # The rate over the whole run so far, and the time left at that rate. Steadier than a
+    # rate over the last few ticks, which jumps about with every pause in the work
+    # : (Node) -> String?
+    def pace: (Node) -> String?
+
+    # : (Node) -> String?
+    def elapsed: (Node) -> String?
+
+    # : () -> Integer
+    def columns: () -> Integer
+
+    # : () -> Integer
+    def rows: () -> Integer
+
+    # : () -> [Integer, Integer]
+    def size: () -> [ Integer, Integer ]
+  end
+end

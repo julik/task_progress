@@ -1,49 +1,64 @@
 # frozen_string_literal: true
+# rbs_inline: enabled
 
 # Hierarchical progress for task trees. A TaskProgress is a handle onto one node of a tree; the
 # tree itself is a Log of change events, applied and numbered under one lock, which outputs
 # receive in order - to draw a terminal, write to a pipe, stream to a browser, or feed a Mount
 # that grafts the tree under a node of a tree in another process.
 #
-#   TaskProgress.cli("Import") do |root|
-#     root.subtask("Download", unit: "bytes") { |t| t.track_io(io) ... }
-#     root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
-#   end
+#     TaskProgress.cli("Import") do |root|
+#       root.subtask("Download", unit: "bytes") { |t| t.track_io(io) ... }
+#       root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
+#     end
 class TaskProgress
+  # @rbs!
+  #   # A task's place in the tree: its ancestors' ids, then its own - `[]` is the root
+  #   type path = Array[String]
+  #
+  #   # Anything that takes the batches a log commits, in order - a lambda will do
+  #   interface _Output
+  #     def call: (Batch batch, Log log) -> void
+  #   end
+  #   type output = Object & _Output
+
+  PARTS = File.expand_path("task_progress", __dir__ || ".") #: String
+  private_constant :PARTS
+
   # Each file loads when its constant is first used, along with what it needs from the standard
   # library (json, openssl), so a program pays only for the parts it touches
-  autoload :VERSION,            File.expand_path("task_progress/version", __dir__)
-  autoload :Event,              File.expand_path("task_progress/event", __dir__)
-  autoload :OPS,                File.expand_path("task_progress/event", __dir__)
-  autoload :Batch,              File.expand_path("task_progress/batch", __dir__)
-  autoload :State,              File.expand_path("task_progress/state", __dir__)
-  autoload :Node,               File.expand_path("task_progress/node", __dir__)
-  autoload :Journal,            File.expand_path("task_progress/journal", __dir__)
-  autoload :Wire,               File.expand_path("task_progress/wire", __dir__)
-  autoload :Log,                File.expand_path("task_progress/log", __dir__)
-  autoload :Transaction,        File.expand_path("task_progress/transaction", __dir__)
-  autoload :Branch,             File.expand_path("task_progress/branch", __dir__)
-  autoload :Mount,              File.expand_path("task_progress/mount", __dir__)
-  autoload :Squasher,           File.expand_path("task_progress/squasher", __dir__)
-  autoload :SummaryOutput,      File.expand_path("task_progress/summary_output", __dir__)
-  autoload :NDJSONOutput,       File.expand_path("task_progress/ndjson_output", __dir__)
-  autoload :PublishingOutput,   File.expand_path("task_progress/publishing_output", __dir__)
-  autoload :BufferedOutput,     File.expand_path("task_progress/buffered_output", __dir__)
-  autoload :RactorOutput,       File.expand_path("task_progress/ractor_output", __dir__)
-  autoload :TerminalOutput,     File.expand_path("task_progress/terminal_output", __dir__)
-  autoload :ExecutionLogOutput, File.expand_path("task_progress/execution_log_output", __dir__)
-  autoload :SSE,                File.expand_path("task_progress/sse", __dir__)
-  autoload :Refinements,        File.expand_path("task_progress/refinements", __dir__)
-  autoload :CancelToken,        File.expand_path("task_progress/cancel_token", __dir__)
-  autoload :TrackedIO,          File.expand_path("task_progress/tracked_io", __dir__)
+  autoload :VERSION,            "#{PARTS}/version"
+  autoload :Event,              "#{PARTS}/event"
+  autoload :OPS,                "#{PARTS}/event"
+  autoload :Batch,              "#{PARTS}/batch"
+  autoload :State,              "#{PARTS}/state"
+  autoload :Node,               "#{PARTS}/node"
+  autoload :Journal,            "#{PARTS}/journal"
+  autoload :Wire,               "#{PARTS}/wire"
+  autoload :Log,                "#{PARTS}/log"
+  autoload :Transaction,        "#{PARTS}/transaction"
+  autoload :Branch,             "#{PARTS}/branch"
+  autoload :Mount,              "#{PARTS}/mount"
+  autoload :Squasher,           "#{PARTS}/squasher"
+  autoload :SummaryOutput,      "#{PARTS}/summary_output"
+  autoload :NDJSONOutput,       "#{PARTS}/ndjson_output"
+  autoload :PublishingOutput,   "#{PARTS}/publishing_output"
+  autoload :BufferedOutput,     "#{PARTS}/buffered_output"
+  autoload :RactorOutput,       "#{PARTS}/ractor_output"
+  autoload :TerminalOutput,     "#{PARTS}/terminal_output"
+  autoload :ExecutionLogOutput, "#{PARTS}/execution_log_output"
+  autoload :SSE,                "#{PARTS}/sse"
+  autoload :Refinements,        "#{PARTS}/refinements"
+  autoload :CancelToken,        "#{PARTS}/cancel_token"
+  autoload :TrackedIO,          "#{PARTS}/tracked_io"
 
   # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
   # constructor (Data#initialize, say) while Ractors run brings the process down, sometimes
   # minutes later and in unrelated code. Ruby 4.0 has it fixed, and the Ractor::Port API with it
-  RACTORS = RUBY_VERSION.split(".").first.to_i >= 4
+  RACTORS = RUBY_VERSION.split(".").first.to_i >= 4 #: bool
 
   # Loads every part now rather than on first use - before forking workers, say, so they share
   # the loaded code. TrackedIO is left out when the progressive_io gem is not there
+  #: () -> singleton(TaskProgress)
   def self.eager_load!
     constants.each do |name|
       const_get(name)
@@ -57,19 +72,31 @@ class TaskProgress
   # An Exception rather than a StandardError, like Interrupt: a `rescue => e` around one step
   # should not swallow it and carry on with the next
   class Canceled < Exception # rubocop:disable Lint/InheritException
-    attr_reader :task
+    # The task that was called off
+    attr_reader :task #: TaskProgress
 
+    # For the task that was called off, and what it is called
+    #: (TaskProgress, ?String) -> void
     def initialize(task, name = task.name)
       @task = task
       super("Task '#{name}' was canceled")
     end
   end
 
-  attr_reader :log, :path
+  # The log the task's tree lives in
+  attr_reader :log #: Log
+  # The task's place in the tree - `[]` for the root
+  attr_reader :path #: path
+
+  ROOT = [] #: path
+  ROOT.freeze
+  private_constant :ROOT
 
   # A root reporting wherever suits a command-line program: a parent process, when it handed
   # one down in TASK_PROGRESS_FD; a redrawn tree on a terminal; an ExecutionLog on CI or when
   # piped. With a block, it runs the block as the root's work and returns its value
+  #: (?String, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
+  #: [T] (?String, ?io: IO | StringIO, ?quiet: bool, **untyped) { (TaskProgress) -> T } -> T?
   def self.cli(name = File.basename($PROGRAM_NAME), io: $stderr, quiet: false, **attributes, &block)
     output = cli_output(io:, quiet:)
     root = new(name, outputs: [output].compact, **attributes)
@@ -78,12 +105,14 @@ class TaskProgress
     end
     return finish_at_exit(root, output) unless block
     begin
-      root.run(&block)
+      root.run { block.call(it) }
     ensure
-      output.close if output.respond_to?(:close)
+      close(output)
     end
   end
 
+  # The output `cli` and `bar` pick for where the program runs, or nil when `quiet`
+  #: (io: IO | StringIO, quiet: bool) -> output?
   def self.cli_output(io:, quiet:)
     if (fd = ENV.delete("TASK_PROGRESS_FD"))
       # Not handed down to a process this one starts, which would hold the pipe open past our exit
@@ -101,8 +130,9 @@ class TaskProgress
   # its count reaches `total`. Without a total it counts and spins. The last frame is drawn at
   # exit, finished or not
   #
-  #   bar = TaskProgress.bar("Importing", total: rows.size)
-  #   rows.each { import(it) && bar.tick! }
+  #     bar = TaskProgress.bar("Importing", total: rows.size)
+  #     rows.each { import(it) && bar.tick! }
+  #: (?String, ?total: Integer?, ?io: IO | StringIO, ?quiet: bool, **untyped) -> TaskProgress
   def self.bar(name = File.basename($PROGRAM_NAME), total: nil, io: $stderr, quiet: false, **attributes)
     output = cli_output(io:, quiet:)
     root = new(name, outputs: [output].compact, total:, indeterminate: total.nil?, **attributes)
@@ -111,6 +141,7 @@ class TaskProgress
 
   # A root nobody runs a block for is finished when the program ends: done if it ends well,
   # failed with the error if it is going down with one
+  #: (TaskProgress, output?) -> TaskProgress
   def self.finish_at_exit(root, output)
     at_exit do
       error = $!
@@ -118,95 +149,148 @@ class TaskProgress
         (error.nil? || (error.is_a?(SystemExit) && error.success?)) ? root.done! : root.fail!(error)
       end
     ensure
-      output.close if output.respond_to?(:close)
+      close(output)
     end
     root
   end
 
+  # Outputs that hold a thread or a screen - TerminalOutput, ExecutionLogOutput, BufferedOutput -
+  # can be closed, to draw their last and stop
+  #: (output?) -> void
+  def self.close(output)
+    output.close if output.respond_to?(:close) # steep:ignore
+  end
+
   # A bar over a collection, see `bar` and `iterate`
   #
-  #   TaskProgress.iterate(rows, "Importing") { |row| import(row) }
+  #     TaskProgress.iterate(rows, "Importing") { |row| import(row) }
+  #: (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
   def self.iterate(collection, name = File.basename($PROGRAM_NAME), total: TaskProgress.size_of(collection), step: 1, **, &block)
     bar(name, total:, **).iterate(collection, step:, &block)
   end
 
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
+  #: (untyped) -> Integer?
   def self.size_of(collection) = (collection.size if collection.respond_to?(:size))
 
   # Where the browser client lives: `task_tree.js` (the fold, and `follow` for an SSE stream),
   # `render_queue.js`, `row_view.js`, a Stimulus controller, a React component and
   # `task_tree.css`. No build step - serve the directory as it is, under any prefix
-  def self.js_path = File.expand_path("../js", __dir__)
+  #: () -> String
+  def self.js_path = File.expand_path("../js", __dir__ || ".")
 
   # A silent root, for a library's default
+  #: (?String) -> TaskProgress
   def self.null(name = "progress") = new(name)
 
   # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
   # and `message:` as the tree changes. See `subtask` for `autofinish`
+  #: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) ?{ (percent: Integer, message: String?) -> void } -> void
   def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, &summary)
     @log = log
-    @path = [].freeze
-    [*outputs, (SummaryOutput.new(&summary) if summary)].compact.each { @log.add_output(it) }
+    @path = ROOT
+    outputs = [*outputs, (SummaryOutput.new { |percent:, message:| summary.call(percent:, message:) } if summary)].compact
+    outputs.each { @log.add_output(it) }
     @log.transaction do |tx|
       tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:))
-      tx.state[[]].autofinish = autofinish
+      tx.state[[]]&.autofinish = autofinish
     end
   end
 
+  # The attributes an `open` carries, without what is at its default
+  #: (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool) -> Hash[Symbol, untyped]
   def self.attributes(name:, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false)
     {name: utf8(name), total:, weight:, expect:, indeterminate: (true if indeterminate), unit:, cancelable: (true if cancelable)}.compact
   end
 
+  # A handle on the task at `path` in `log`, without opening anything
+  #: (Log, path) -> TaskProgress
   def self.handle(log, path) = allocate.tap { it.instance_variable_set(:@log, log); it.instance_variable_set(:@path, path.frozen? ? path : path.dup.freeze) }
 
-  def node = @log.snapshot[@path]
+  # The task as the tree holds it now - frozen, and safe to read from any thread
+  #: () -> Node
+  def node = @log.snapshot[@path] || raise(ArgumentError, "No task at #{@path.inspect} - it was pruned")
 
+  # What it is called
+  #: () -> String
   def name = node.name
 
+  # `:pending`, `:active`, `:done`, `:failed` or `:canceled`
+  #: () -> Symbol
   def status = node.status
 
+  # A whole percent, 100 only once it and everything under it are done
+  #: () -> Integer
   def percent = @log.snapshot.percent(@path)
 
+  # How far along, 0.0..1.0, unrounded
+  #: () -> Float
   def fraction = @log.snapshot.fraction(@path)
 
+  # The latest thing it said, see `note`
+  #: () -> String?
   def message = node.message
 
+  # What it failed with: `class`, `message`, `backtrace` and `cause`, see `fail!`
+  #: () -> Hash[Symbol, untyped]?
   def error = node.error
 
+  # How many it has counted, see `advance!`
+  #: () -> Integer
   def count = node.count
 
+  # How many it counts to, or nil when it has no total
+  #: () -> Integer?
   def total = node.total
 
+  # Done, and everything under it ended
+  #: () -> bool
   def done? = @log.snapshot.complete?(@path)
 
+  # Ended by `fail!`
+  #: () -> bool
   def failed? = status == :failed
 
+  # Ended by `cancel!`, or by a task above it being canceled
+  #: () -> bool
   def canceled? = status == :canceled
 
   # Whether a reader may offer to call it off, and it has not ended yet
+  #: () -> bool
   def cancelable? = !!node.cancelable && !finished?
 
   # The task at `path` under this one - an Array of ids, or the ids joined with a dash, the way
   # the browser client keys its rows (`x3k0-00af`) - or nil
+  #: (path | String) -> TaskProgress?
   def find(path)
     path = path.split("-") if path.is_a?(String)
     full = [*@path, *path]
     TaskProgress.handle(@log, full) if @log.snapshot.key?(full)
   end
 
-  # Ended, by `done!` or `fail!` - whether or not everything under it did
+  # Ended, by `done!`, `fail!` or `cancel!` - whether or not everything under it did
+  #: () -> bool
   def finished? = node.finished?
 
-  def parent = (TaskProgress.handle(@log, @path[0...-1]) unless @path.empty?)
+  # The task it is under, or nil for the root
+  #: () -> TaskProgress?
+  def parent = (TaskProgress.handle(@log, @path.take(@path.length - 1)) unless @path.empty?)
 
+  # The root of its tree
+  #: () -> TaskProgress
   def root = TaskProgress.handle(@log, [])
 
+  # The tasks directly under it, in the order they opened
+  #: () -> Array[TaskProgress]
   def subtasks = @log.snapshot.children(@path).map { TaskProgress.handle(@log, it) }
 
   # Sends this task's subtree to an output, as a tree of its own rooted at `[]` - for the root
   # that is the whole tree. See Log#add_output
+  #: (?output?, ?replay: bool) ?{ (Batch, Log) -> void } -> output
   def add_output(output = nil, replay: true, &block) = @log.add_output(output, replay:, path: @path, &block)
 
+  # Stops sending to an output, as it was given to `add_output`
+  #: (output) -> void
   def remove_output(output) = @log.remove_output(output)
 
   # A child task. `total:` makes it counted (drive it with `advance!`), `indeterminate: true`
@@ -218,19 +302,23 @@ class TaskProgress
   #
   # `cancelable: true` tells whoever draws the tree that it may offer to call the task off - see
   # `find` and `cancel!` for taking that request back
+  #: (String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) -> TaskProgress
+  #: [T] (String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) { (TaskProgress) -> T } -> T?
   def subtask(name, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, &block)
     child = @log.transaction do |tx|
       writable!(tx)
       path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, total:, weight:, expect:, indeterminate:, unit:, cancelable:))
-      tx.state[path].autofinish = autofinish
+      tx.state[path]&.autofinish = autofinish
       TaskProgress.handle(@log, path)
     end
-    block ? child.run(&block) : child
+    block ? child.run { block.call(it) } : child
   end
 
   # Runs the block as this task's work: done when it returns, failed with the error when it
-  # raises - an Interrupt or a SignalException included - and the error raised on
+  # raises - an Interrupt or a SignalException included - and the error raised on. A task
+  # canceled ends its work quietly: `run` returns nil
+  #: [T] () { (TaskProgress) -> T } -> T?
   def run
     result = yield self
     done!
@@ -252,6 +340,7 @@ class TaskProgress
   end
 
   # Moves the percent; 100 finishes the task
+  #: (percent: Integer | Float, ?message: String?) -> self
   def update_to(percent:, message: nil)
     @log.transaction do |tx|
       writable!(tx)
@@ -261,18 +350,23 @@ class TaskProgress
     self
   end
 
+  # Adds to the count - finishing the task, if that reaches its total
+  #: (?Integer, ?message: String?) -> self
   def advance!(by = 1, message: nil)
     @log.transaction do |tx|
       writable!(tx)
-      node = tx.state[@path]
-      next if node.autofinish && node.total && node.count >= node.total && node.status == :done # more work than the total said
+      node = tx.state[@path] or next
+      total = node.total
+      next if node.autofinish && total && node.count >= total && node.status == :done # more work than the total said
       tx << Event.new(path: @path, op: :add, value: by)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
-      tx << Event.new(path: @path, op: :done) if node.autofinish && node.total && node.count >= node.total
+      tx << Event.new(path: @path, op: :done) if node.autofinish && total && node.count >= total
     end
     self
   end
 
+  # Adds one to the count, see `advance!`
+  #: (?message: String?) -> self
   def tick!(message: nil) = advance!(1, message:)
 
   # Goes through a collection a step per item. Given a name it opens a subtask for it, and
@@ -281,8 +375,9 @@ class TaskProgress
   # with the error if the block raises. Without a block it returns an Enumerator, which does
   # the same as it is consumed
   #
-  #   root.iterate(files, "Files") { |file| copy(file) }
-  #   root.iterate(rows, "Rows").map { transform(it) }
+  #     root.iterate(files, "Files") { |file| copy(file) }
+  #     root.iterate(rows, "Rows").map { transform(it) }
+  #: (Enumerable[untyped], ?String?, ?total: Integer?, ?step: Integer) ?{ (untyped) -> untyped } -> untyped
   def iterate(collection, name = nil, total: TaskProgress.size_of(collection), step: 1, &block)
     if name
       task = subtask(name, total:, indeterminate: total.nil?)
@@ -311,20 +406,27 @@ class TaskProgress
 
   # Prints a line above the tree, where it stays. It changes nothing in the tree itself, so a
   # reader joining later never sees it - like anything said on a terminal
+  #: (_ToS) -> self
   def puts(message)
     @log.transaction { |tx| writable!(tx) && tx << Event.new(path: @path, op: :say, value: TaskProgress.utf8(message.to_s)) }
     self
   end
 
+  # The latest thing it says, shown on its row
+  #: (String?) -> self
   def note(message)
     @log.transaction { |tx| writable!(tx) && tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) }
     self
   end
 
+  # Changes what it counts to
+  #: (Integer?) -> void
   def total=(total)
     meta(total:)
   end
 
+  # Renames it
+  #: (String) -> void
   def name=(name)
     meta(name: TaskProgress.utf8(name))
   end
@@ -333,6 +435,7 @@ class TaskProgress
   # own, deepest first, in the same batch. The work they were part of is over, and a reader
   # should not be left waiting on a task nobody will ever finish. What was mounted is left to
   # its Mount
+  #: (?String?) -> self
   def done!(message = nil)
     @log.transaction do |tx|
       next unless writable!(tx, finishing: true)
@@ -347,10 +450,11 @@ class TaskProgress
   # error, booleans and integers only - a reader drops the rest
   #
   # What is still open under it is canceled: it did not fail, it was cut short
+  #: (?(Exception | String)?, **bool | Integer) -> self
   def fail!(error = nil, **extra)
     @log.transaction do |tx|
       next unless writable!(tx, finishing: true)
-      error = Wire.error_to_h(error || "#{tx.state[@path].name} failed").merge(extra)
+      error = Wire.error_to_h(error || "#{tx.state[@path]&.name} failed").merge(extra)
       tx.state.open_under(@path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel) }
       tx << Event.new(path: @path, op: :fail, value: error)
     end
@@ -360,6 +464,7 @@ class TaskProgress
   # Calls the task off, and every task still open under it, each with a `cancel` of its own -
   # from any thread. Whoever works on one of them next gets a Canceled, which `run` takes as
   # the end of that task's work. Canceling a finished task does nothing
+  #: (?String?) -> self
   def cancel!(reason = nil)
     @log.transaction { |tx| writable!(tx, finishing: true) && TaskProgress.cancel_in(tx, @path, reason) }
     self
@@ -368,7 +473,8 @@ class TaskProgress
   # Calls the block with the reason once this task is canceled, see Log#on_cancel. For work that
   # blocks and so would not notice a cancel until it next touches its task:
   #
-  #   rows.on_cancel { http.finish }
+  #     rows.on_cancel { http.finish }
+  #: () { (String?) -> void } -> self
   def on_cancel(&block)
     @log.on_cancel(@path, &block)
     self
@@ -378,28 +484,29 @@ class TaskProgress
   # (a browser, a parent process) comes in. Everything is decided in one transaction against the
   # tree as it stands, so it cannot race the task finishing. Returns:
   #
-  #   :canceled   it was, along with everything still open under it
-  #   :forwarded  it lives in a mounted child, which was asked; its cancel comes back up the stream
-  #   :moot       there is nothing left to cancel - no such task, or it has already ended
-  #   :refused    it is not cancelable
+  #     :canceled   it was, along with everything still open under it
+  #     :forwarded  it lives in a mounted child, which was asked; its cancel comes back up the stream
+  #     :moot       there is nothing left to cancel - no such task, or it has already ended
+  #     :refused    it is not cancelable
   #
   # A request that comes too late is moot, not an error: by the time it arrives the task may well
   # have finished, and its process exited
+  #: (path | String, ?String?) -> Symbol
   def request_cancel(path, reason = nil)
     path = path.split("-") if path.is_a?(String)
     full = [*@path, *path].freeze
-    outcome = @log.transaction do |tx|
+    outcome, mount, remote_path = @log.transaction do |tx|
       node = tx.state[full]
-      next :moot if node.nil? || node.finished?
-      next :refused unless node.cancelable
-      mounted_at = (full.length - 1).downto(0).map { full[0, it] }.find { tx.state[it]&.sealed }
-      next [tx.state[mounted_at].sealed, full.drop(mounted_at.length)] if mounted_at
+      next [:moot, nil, nil] if node.nil? || node.finished?
+      next [:refused, nil, nil] unless node.cancelable
+      mounted_at = (full.length - 1).downto(0).map { full.take(it) }.find { tx.state[it]&.sealed }
+      mount = tx.state[mounted_at]&.sealed if mounted_at
+      next [:forwarded, mount, full.drop(mounted_at.length)] if mount && mounted_at
       TaskProgress.cancel_in(tx, full, reason)
-      :canceled
-    end
-    return outcome unless outcome.is_a?(Array)
-    mount, remote_path = outcome
-    mount.request_cancel(remote_path, reason)
+      [:canceled, nil, nil]
+    end #: [Symbol, Mount?, path?]
+    return mount.request_cancel(remote_path, reason) if mount && remote_path
+    outcome
   end
 
   # Reads cancel requests off an IO - one JSON line each, `{"cancel": [ids], "reason": "..."}` -
@@ -408,11 +515,12 @@ class TaskProgress
   #
   # The root itself, `[]`, is what the parent mounted, and only the parent asks for it: the
   # mount was ended there, so the root is canceled whether it is cancelable or not
+  #: (IO) -> Thread
   def accept_cancel_requests(io)
     require "json"
     Thread.new do
       Thread.current.report_on_exception = false
-      io.each_line(Wire::TEXT_LIMIT) do |line|
+      io.each_line("\n", Wire::TEXT_LIMIT) do |line|
         request = JSON.parse(line) rescue next
         next unless request.is_a?(Hash) && (path = request["cancel"]).is_a?(Array) && path.length <= Wire::MAX_DEPTH
         next unless path.all? { it.is_a?(String) && it.match?(Wire::SEGMENT) }
@@ -424,6 +532,7 @@ class TaskProgress
   end
 
   # Every task called off carries the reason, so each of them can say why it stopped
+  #: (Transaction, path, String?) -> void
   def self.cancel_in(tx, path, reason)
     reason = (utf8(reason.to_s) if reason)
     tx.state.open_under(path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel, value: reason) }
@@ -431,22 +540,24 @@ class TaskProgress
   end
 
   # Everything the block does to the tree lands as one batch, or none of it does
+  #: [T] () { (TaskProgress) -> T } -> T
   def transaction
     @log.transaction { yield self }
   end
 
   # A child whose subtree is fed from elsewhere - a subprocess, a Ractor, a stream. Only the
   # Mount writes under it, see Mount
+  #: (String, ?weight: (Integer | Float)?, ?cancelable: bool) -> Mount
   def mount(name, weight: nil, cancelable: false)
     path = @log.transaction do |tx|
       writable!(tx)
       path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, weight:, cancelable:))
       # The node holds its Mount, so a cancel request for a task under it can be passed on
-      tx.state[path].sealed = Mount.new(@log, path)
-      path
+      mount = Mount.new(@log, path)
+      tx.state[path]&.sealed = mount
+      mount
     end
-    @log.snapshot[path].sealed
   end
 
   # Wraps an IO so that reading it advances this task by the bytes read, see TrackedIO. The total
@@ -454,25 +565,35 @@ class TaskProgress
   # block, the block runs with the wrapped IO as this task's work, see `run`. Needs the
   # progressive_io gem, and an IO that can tell its position - for a pipe or a socket, call
   # `advance!` with each chunk instead
+  #: (untyped, ?total: Integer?, ?step: Integer?) -> TrackedIO
+  #: [T] (untyped, ?total: Integer?, ?step: Integer?) { (TrackedIO) -> T } -> T?
   def track_io(io, total: nil, step: nil)
     raise ArgumentError, "#{io.class} cannot tell its position, so reading it cannot be tracked - call advance! with each chunk instead" unless positioned?(io)
     total ||= io.size if io.respond_to?(:size)
     meta(total:, unit: "bytes", indeterminate: total.nil?)
     tracked = TrackedIO.new(io, self, total:, step:)
     return tracked unless block_given?
-    run { yield(tracked).tap { tracked.flush_progress } }
+    run { yield(tracked).tap { tracked.flush_progress } } # steep:ignore
   end
 
+  # The same task in the same tree
+  #: (untyped) -> bool
   def ==(other) = other.is_a?(TaskProgress) && other.log.equal?(@log) && other.path == @path
   alias_method :eql?, :==
 
+  # Equal handles hash alike, so a task works as a Hash key
+  #: () -> Integer
   def hash = [@log.object_id, @path].hash
 
-  def inspect = "#<TaskProgress #{@path.inspect} #{node&.name.inspect} #{node&.status}>"
+  # Its path, name and status
+  #: () -> String
+  def inspect = "#<TaskProgress #{@path.inspect} #{@log.snapshot[@path]&.name.inspect} #{@log.snapshot[@path]&.status}>"
 
-  SCALE = [["TB", 1024**4], ["GB", 1024**3], ["MB", 1024**2], ["KB", 1024]].map(&:freeze).freeze
+  SCALE = [["TB", 1024**4], ["GB", 1024**3], ["MB", 1024**2], ["KB", 1024]].map(&:freeze).freeze #: Array[[String, Integer]]
+  private_constant :SCALE
 
-  # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
+  # "4.2s", "3m07s", "2h15m"
+  #: (Integer | Float) -> String
   def self.duration(seconds)
     if seconds < 60 then format("%.1fs", seconds)
     elsif seconds < 3600 then format("%dm%02ds", seconds / 60, seconds % 60)
@@ -480,10 +601,12 @@ class TaskProgress
     end
   end
 
+  # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
+  #: (Integer | Float) -> String
   def self.human_bytes(n)
     n = n.to_i
-    unit, size = SCALE.find { |_, size| n >= size }
-    return "#{n} bytes" if unit.nil?
+    found = SCALE.find { |_, size| n >= size } or return "#{n} bytes"
+    unit, size = found
     value = (n.to_f / size).round(1)
     number = (value % 1).zero? ? value.to_i.to_s : format("%.1f", value)
     "#{number} #{unit}"
@@ -492,6 +615,8 @@ class TaskProgress
   # Every message reaches the tree as valid UTF-8. Messages often name files, and a raw
   # ZIP read hands those back tagged ASCII-8BIT, so a "Reading Alice’s.xhtml" would
   # otherwise blow up whatever an output writes to (a database column, a UTF-8 log line)
+  #: (nil) -> nil
+  #: (untyped) -> String
   def self.utf8(message)
     return if message.nil?
     message = message.to_s
@@ -501,6 +626,7 @@ class TaskProgress
 
   private
 
+  #: (**untyped) -> self
   def meta(**attributes)
     @log.transaction { |tx| writable!(tx) && tx << Event.new(path: @path, op: :meta, value: attributes) }
     self
@@ -508,6 +634,7 @@ class TaskProgress
 
   # Finishing a finished task is a no-op; anything else on one raises, as does writing under
   # a mount from here
+  #: (Transaction, ?finishing: bool) -> bool
   def writable!(tx, finishing: false)
     node = tx.state[@path] or raise ArgumentError, "No task at #{@path.inspect}"
     # Under a mount only the Mount writes - but the mount's own task is the parent's to end
@@ -518,8 +645,10 @@ class TaskProgress
     !(finishing && node.finished?)
   end
 
-  def sealed?(state, above: false) = (0..(above ? @path.length - 1 : @path.length)).any? { state[@path[0, it]]&.sealed }
+  #: (State, ?above: bool) -> bool
+  def sealed?(state, above: false) = (0..(above ? @path.length - 1 : @path.length)).any? { state[@path.take(it)]&.sealed }
 
+  #: (untyped) -> bool
   def positioned?(io)
     io.pos
     true

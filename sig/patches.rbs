@@ -1,0 +1,12 @@
+# What the RBS that ships with rbs lacks, and this code uses
+
+# Thread.handle_interrupt always takes a block - RBS's own signature has none
+class Thread
+  def self.handle_interrupt: [T] (Hash[singleton(Exception), Symbol]) { () -> T } -> T
+                           | ...
+end
+
+# Process.spawn is Kernel#spawn as a module function - RBS has only the latter
+module Process
+  def self.spawn: (*untyped) -> Integer
+end

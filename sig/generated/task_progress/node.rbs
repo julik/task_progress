@@ -1,0 +1,63 @@
+# Generated from lib/task_progress/node.rb with RBS::Inline
+
+class TaskProgress
+  # :nodoc:
+  class Node < Struct[String | Integer? | Integer | Integer | Float | Float | bool? | String? | Symbol | Hash[Symbol, untyped]? | Float? | Array[String] | Mount?]
+    attr_accessor name(): String
+
+    attr_accessor total(): Integer?
+
+    attr_accessor count(): Integer
+
+    attr_accessor percent(): Integer | Float
+
+    attr_accessor weight(): Float
+
+    attr_accessor expect(): Integer?
+
+    attr_accessor indeterminate(): bool?
+
+    attr_accessor unit(): String?
+
+    attr_accessor cancelable(): bool?
+
+    attr_accessor message(): String?
+
+    attr_accessor status(): Symbol
+
+    attr_accessor error(): Hash[Symbol, untyped]?
+
+    attr_accessor stale(): bool?
+
+    attr_accessor opened_at(): Float
+
+    attr_accessor started_at(): Float?
+
+    attr_accessor finished_at(): Float?
+
+    attr_accessor children(): Array[String]
+
+    attr_accessor sealed(): Mount?
+
+    attr_accessor autofinish(): bool?
+
+    def self.new: (?String name, ?Integer? total, ?Integer count, ?Integer | Float percent, ?Float weight, ?Integer? expect, ?bool? indeterminate, ?String? unit, ?bool? cancelable, ?String? message, ?Symbol status, ?Hash[Symbol, untyped]? error, ?bool? stale, ?Float opened_at, ?Float? started_at, ?Float? finished_at, ?Array[String] children, ?Mount? sealed, ?bool? autofinish) -> instance
+                | (?name: String, ?total: Integer?, ?count: Integer, ?percent: Integer | Float, ?weight: Float, ?expect: Integer?, ?indeterminate: bool?, ?unit: String?, ?cancelable: bool?, ?message: String?, ?status: Symbol, ?error: Hash[Symbol, untyped]?, ?stale: bool?, ?opened_at: Float, ?started_at: Float?, ?finished_at: Float?, ?children: Array[String], ?sealed: Mount?, ?autofinish: bool?) -> instance
+  end
+
+  # One task, as the tree holds it: State::FIELDS, and then what never goes over the wire -
+  # its children's ids, the Mount that feeds it if one does, and whether it finishes at its total
+  class Node
+    # Ended by a `done`, `fail` or `cancel` of its own - whatever is still open under it
+    # : () -> bool
+    def finished?: () -> bool
+
+    # As a `put` carries it: State::FIELDS, without what is at its default
+    # : () -> Hash[Symbol, untyped]
+    def to_h: () -> Hash[Symbol, untyped]
+
+    # A copy whose list of children can change without changing this one
+    # : () -> Node
+    def deep_dup: () -> Node
+  end
+end

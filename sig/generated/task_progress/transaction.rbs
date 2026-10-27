@@ -1,0 +1,33 @@
+# Generated from lib/task_progress/transaction.rb with RBS::Inline
+
+class TaskProgress
+  # What a block given to Log#transaction adds its events through. Each one is applied to the
+  # tree as it comes, and journaled, so the whole transaction can be undone if the block raises
+  class Transaction
+    # What it has added so far, in order
+    attr_reader events: Array[Event]
+
+    # What it changed, to undo it by
+    attr_reader journal: Journal
+
+    # The time it opened - every event in it happens then
+    attr_reader at: Float
+
+    # The tree as the transaction has it so far
+    attr_reader state: State
+
+    @random: Random
+
+    # For changing `state` at `at`, drawing task ids from `random` - see Log#transaction, which opens one
+    # : (State, Float, Random) -> void
+    def initialize: (State, Float, Random) -> void
+
+    # Applies the event, and adds it to the batch
+    # : (Event) -> self
+    def <<: (Event) -> self
+
+    # A path for a new child of `path` - see State#new_child
+    # : (path) -> path
+    def new_child: (path) -> path
+  end
+end

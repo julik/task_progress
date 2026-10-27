@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# rbs_inline: enabled
 
 require "json"
 require "rbconfig"
@@ -14,8 +15,24 @@ class TaskProgress
   # A batch that does not follow the last one (a gap) marks the subtree stale, and it stays so
   # until a batch with `prev` 0 replaces it whole
   class Mount
-    attr_reader :log, :path, :last_seq
+    # The log the mount node lives in
+    attr_reader :log #: Log
+    # The mount node
+    attr_reader :path #: path
+    # The seq of the remote's last batch it applied
+    attr_reader :last_seq #: Integer?
 
+    # @rbs @control: IO?
+    # @rbs @control_lock: Thread::Mutex
+    # @rbs @pid_lock: Thread::Mutex
+    # @rbs @source: String?
+    # @rbs @stale: bool
+    # @rbs @remote_ended: bool
+    # @rbs @controlled: bool
+    # @rbs @reaped: bool
+
+    # For the node at `path` - see TaskProgress#mount, which opens one
+    #: (Log, path) -> void
     def initialize(log, path)
       @log = log
       @path = path
@@ -25,18 +42,27 @@ class TaskProgress
       @source = nil
       @last_seq = nil
       @stale = false
+      @remote_ended = false
+      @controlled = false
+      @reaped = false
     end
 
+    # The mount node, as a task of this tree
+    #: () -> TaskProgress
     def task = TaskProgress.handle(@log, @path)
 
+    # Whether a batch went missing, and the subtree waits for a fresh squash
+    #: () -> bool
     def stale? = @stale
 
     # Takes a Batch, its Hash form, or a line of NDJSON. Returns :applied, :gap, :rejected, or
     # :duplicate for one already applied - redelivery is ordinary after a reconnect or a replay
+    #: (Batch | Hash[untyped, untyped] | String) -> (:applied | :gap | :rejected | :duplicate)
     def <<(batch)
       batch = coerce(batch) or return :rejected
       return :rejected if finished? # ended here - what the remote sent on its way out changes nothing
-      if batch.log == @source && !batch.reset? && batch.seq <= @last_seq
+      last_seq = @last_seq
+      if batch.log == @source && !batch.reset? && last_seq && batch.seq <= last_seq
         return :duplicate
       elsif !batch.reset? && (batch.log != @source || batch.prev != @last_seq)
         mark_stale
@@ -64,6 +90,7 @@ class TaskProgress
     end
 
     # Reads NDJSON batches off an IO until EOF
+    #: (IO) -> self
     def follow(io)
       Wire.each_batch(io) { self << it }
       self
@@ -77,10 +104,11 @@ class TaskProgress
     # the mount itself is canceled, the child is asked to cancel its root, and is sent TERM if it
     # is still running `grace` seconds later. Interrupted (Ctrl-C, a timeout), it terminates the
     # child at once
+    #: (*untyped command, ?grace: Integer | Float, **untyped options) -> Process::Status?
     def spawn(*command, grace: 5, **options)
       reader, writer = IO.pipe
       control_reader, @control = IO.pipe
-      env = command.first.is_a?(Hash) ? command.shift : {}
+      env = command.first.is_a?(Hash) ? command.shift : {} #: Hash[String, String]
       status = nil
       @reaped = false
       pid = Process.spawn({**env, "TASK_PROGRESS_FD" => "3", "TASK_PROGRESS_CONTROL_FD" => "4"}, *command,
@@ -91,7 +119,7 @@ class TaskProgress
       task.on_cancel { stop(pid, grace) unless @remote_ended }
       follow(reader)
       status = reap(pid)
-      fail!("#{File.basename(command.first.to_s)} exited with #{status.exitstatus || status.termsig}") unless status.success?
+      fail!("#{File.basename(command.first.to_s)} exited with #{status.exitstatus || status.termsig}") if status && !status.success?
       fail!("#{File.basename(command.first.to_s)} exited without finishing") unless finished?
       status
     rescue Interrupt => e
@@ -114,11 +142,13 @@ class TaskProgress
     # Passes a cancel request on to the child, for the task at `path` in its own tree. Returns
     # :forwarded, or :moot when there is no child to ask any more - it has exited, or this mount
     # was never spawned. Whether the child cancels anything shows up the stream, if it does
+    #: (path, ?String?) -> (:forwarded | :moot)
     def request_cancel(path, reason = nil)
       line = JSON.generate({cancel: path, reason:}.compact) + "\n"
       @control_lock.synchronize do
-        return :moot if @control.nil? || @control.closed?
-        @control.write_nonblock(line) # a child too stuck to read its requests is past asking
+        control = @control
+        return :moot if control.nil? || control.closed?
+        control.write_nonblock(line) # a child too stuck to read its requests is past asking
       end
       :forwarded
     rescue IO::WaitWritable, IOError, SystemCallError
@@ -126,34 +156,43 @@ class TaskProgress
     end
 
     # The parent may still end the subtree - when the remote went away, say
+    #: () -> self
     def done!
       finish(:done) { |tx| tx << Event.new(path: @path, op: :done) }
     end
 
+    # Fails the mount, and cancels what the remote left open under it
+    #: (?(Exception | String)?, **bool | Integer) -> self
     def fail!(error = nil, **extra)
       finish(:cancel) do |tx|
-        tx << Event.new(path: @path, op: :fail, value: Wire.error_to_h(error || "#{tx.state[@path].name} failed").merge(extra))
+        tx << Event.new(path: @path, op: :fail, value: Wire.error_to_h(error || "#{tx.state[@path]&.name} failed").merge(extra))
       end
     end
 
+    # Cancels the mount, and what the remote left open under it
+    #: (?String?) -> self
     def cancel!(reason = nil)
       finish(:cancel) { |tx| tx << Event.new(path: @path, op: :cancel, value: (TaskProgress.utf8(reason.to_s) if reason)) }
     end
 
+    # Whether the mount node has ended
+    #: () -> bool
     def finished? = task.finished?
 
     private
 
     # Ending the mount ends what the remote left open under it too, as Task#done! and #fail! do
+    #: (Symbol) { (Transaction) -> void } -> self
     def finish(closing)
       @log.transaction do |tx|
-        next if tx.state[@path].finished?
+        next if tx.state[@path]&.finished?
         tx.state.open_under(@path).reverse_each { tx << Event.new(path: it, op: closing) }
         yield tx
       end
       self
     end
 
+    #: (Batch | Hash[untyped, untyped] | String) -> Batch?
     def coerce(batch)
       case batch
       when Batch then batch
@@ -162,12 +201,15 @@ class TaskProgress
       end
     end
 
+    #: () -> void
     def mark_stale
       return if @stale
       @stale = true
       @log.append(Event.new(path: @path, op: :meta, value: {stale: true}))
     end
 
+    # The remote's events, moved under the mount - or nil if one would land too deep
+    #: (Array[Event], Float) -> Array[Event]?
     def translate(events, offset)
       events.map do |event|
         path = [*@path, *event.path]
@@ -186,6 +228,7 @@ class TaskProgress
     end
 
     # Asks the child to cancel its root, and sends TERM if it has not exited `grace` seconds on
+    #: (Integer, Integer | Float) -> void
     def stop(pid, grace)
       request_cancel([], task.message)
       Thread.new do
@@ -196,12 +239,14 @@ class TaskProgress
 
     # The pid is only ever signaled while it is still ours: reaping and signaling share a lock, so
     # a signal can never reach another process that was given the pid after ours exited
+    #: (Integer, Symbol) -> void
     def signal(pid, name)
       @pid_lock.synchronize { Process.kill(name, pid) unless @reaped }
     rescue Errno::ESRCH
       nil
     end
 
+    #: (Integer) -> Process::Status?
     def reap(pid)
       @pid_lock.synchronize do
         _, status = Process.wait2(pid)
@@ -213,17 +258,20 @@ class TaskProgress
       nil
     end
 
-    TIMES = %i[opened_at started_at finished_at].freeze
-    ENDINGS = %i[done fail cancel].freeze
-    FINISHED = %i[done failed canceled].freeze
+    TIMES = %i[opened_at started_at finished_at].freeze #: Array[Symbol]
+    ENDINGS = %i[done fail cancel].freeze #: Array[Symbol]
+    FINISHED = %i[done failed canceled].freeze #: Array[Symbol]
+    private_constant :TIMES, :ENDINGS, :FINISHED
 
+    #: (Hash[Symbol, untyped], Float) -> Hash[Symbol, untyped]
     def rebased(value, offset)
       return value if offset.zero?
       value.merge(value.slice(*TIMES).compact.transform_values { it + offset })
     end
 
+    #: (Hash[Symbol, untyped]) -> Hash[Symbol, untyped]
     def own_put(value)
-      node = @log.snapshot[@path]
+      node = @log.snapshot[@path] or return value
       value.merge(name: node.name, weight: node.weight, cancelable: node.cancelable).compact
     end
   end

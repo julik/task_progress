@@ -1,0 +1,6 @@
+# Generated from lib/task_progress/version.rb with RBS::Inline
+
+class TaskProgress
+  # The gem's version
+  VERSION: String
+end

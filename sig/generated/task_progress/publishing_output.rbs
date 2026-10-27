@@ -1,0 +1,24 @@
+# Generated from lib/task_progress/publishing_output.rb with RBS::Inline
+
+class TaskProgress
+  # Hands each batch, as its JSON-ready Hash, to anything with `publish(event_name, payload)`
+  # - a Sossego::Stream, for one. A reader turns it back into a Batch with Wire.from_h, or
+  # feeds it to a Mount as it is
+  class PublishingOutput
+    interface _Publisher
+      def publish: (String event_name, Hash[Symbol, untyped] payload) -> void
+    end
+
+    @target: _Publisher
+
+    @event_name: String
+
+    # Publishes to `target` - a Sossego stream, or anything with `publish(event_name, payload)`
+    # : (_Publisher, ?event_name: String) -> void
+    def initialize: (_Publisher, ?event_name: String) -> void
+
+    # Publishes the batch as a JSON-ready Hash
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+  end
+end

@@ -1,0 +1,33 @@
+# Generated from lib/task_progress/batch.rb with RBS::Inline
+
+class TaskProgress
+  # :nodoc:
+  class Batch < Data
+    attr_reader log(): String?
+
+    attr_reader prev(): Integer
+
+    attr_reader seq(): Integer
+
+    attr_reader at(): Float
+
+    attr_reader events(): Array[Event]
+
+    def self.new: (String? log, Integer prev, Integer seq, Float at, Array[Event] events) -> instance
+                | (log: String?, prev: Integer, seq: Integer, at: Float, events: Array[Event]) -> instance
+
+    def self.members: () -> [ :log, :prev, :seq, :at, :events ]
+
+    def members: () -> [ :log, :prev, :seq, :at, :events ]
+  end
+
+  # The unit of commit: everything one transaction changed, in order. `seq` counts batches,
+  # not events, and `prev` names the batch it follows - so a reader that sees a `prev` other
+  # than the `seq` it last saw knows it missed something. `prev` 0 means "from the start",
+  # which is also how a squashed replay announces itself
+  class Batch
+    # Whether it starts over from nothing, as a squash does
+    # : () -> bool
+    def reset?: () -> bool
+  end
+end

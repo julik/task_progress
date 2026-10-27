@@ -1,0 +1,52 @@
+# Generated from lib/task_progress/sse.rb with RBS::Inline
+
+class TaskProgress
+  # A Rack response body streaming a tree as Server-Sent Events: first the tree so far, squashed
+  # into one batch with `prev` 0, then every batch as it commits - each in a `batch` event whose
+  # `id:` is its seq. A browser that reconnects starts over from a fresh squash, which is always
+  # right and costs a few puts. The stream ends once the root is finished. Given a subtask, it
+  # streams only that task's subtree, with the subtask as the root.
+  #
+  #     # Rack
+  #     [200, TaskProgress::SSE::HEADERS, TaskProgress::SSE.new(task)]
+  #     # Rails
+  #     headers.merge!(TaskProgress::SSE::HEADERS)
+  #     self.response_body = TaskProgress::SSE.new(task)
+  #
+  # The tree must live in the serving process. For one that lives in a job elsewhere, have the
+  # job publish to a stream (PublishingOutput) and serve that
+  class SSE
+    # What an SSE response is sent with
+    HEADERS: Hash[String, String]
+
+    @source: TaskProgress | Log
+
+    @heartbeat: Integer | Float
+
+    @retry_ms: Integer
+
+    # A whole Rack response: status, headers and this body
+    # : (TaskProgress | Log, **untyped) -> [Integer, Hash[String, String], SSE]
+    def self.response: (TaskProgress | Log, **untyped) -> [ Integer, Hash[String, String], SSE ]
+
+    # One batch as an SSE event
+    # : (Batch) -> String
+    def self.frame: (Batch) -> String
+
+    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of quiet, and telling the browser to reconnect after `retry_ms`
+    # : (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer) -> void
+    def initialize: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer) -> void
+
+    # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
+    # : () { (String) -> void } -> void
+    def each: () { (String) -> void } -> void
+
+    private
+
+    # Judged by what was sent, never by the snapshot: that runs ahead of delivery, and ending on
+    # it could cut the stream before the batch that finished the root went out. An empty reset
+    # is a branch whose task was pruned, which will not come back either
+    # : (Batch) -> bool
+    def finishes_root?: (Batch) -> bool
+  end
+end

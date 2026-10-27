@@ -1,0 +1,97 @@
+# Generated from lib/task_progress/wire.rb with RBS::Inline
+
+class TaskProgress
+  # A batch as JSON, one object per line:
+  #
+  #     {"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0","00af"],"set",40],[["x3k0"],"note","Reading"]]}
+  #
+  # The reading side is meant for a writer we do not trust - a subprocess parsing hostile input,
+  # a stream relayed from elsewhere - so nothing it sends is taken at its word: a batch with
+  # anything wrong in it is dropped whole, numbers are clamped, strings scrubbed and cut, paths
+  # bounded, and nothing in an error is ever turned into a class
+  module Wire
+    # The longest line a reader takes - see the MANUAL for what every limit is for
+    LINE_LIMIT: Integer
+
+    # Where a string is cut
+    TEXT_LIMIT: Integer
+
+    # How much of a backtrace is kept
+    BACKTRACE_LINES: Integer
+
+    # How many causes of an error are kept
+    CAUSES: Integer
+
+    # How deep a path may go
+    MAX_DEPTH: Integer
+
+    # What a task id may be: lower case letters and digits, 16 at most
+    SEGMENT: Regexp
+
+    # The most events one batch may carry
+    MAX_OPS: Integer
+
+    # The largest count or total - what a JavaScript number holds exactly
+    MAX_COUNT: Integer
+
+    # What a `put` may say a task's status is
+    STATUSES: Array[String]
+
+    # The batch as a JSON-ready Hash
+    # : (Batch) -> Hash[Symbol, untyped]
+    def self.to_h: (Batch) -> Hash[Symbol, untyped]
+
+    # The batch as one line of JSON, without the newline
+    # : (Batch) -> String
+    def self.dump: (Batch) -> String
+
+    # A Batch, or nil when the line is anything but a valid one
+    # : (String) -> Batch?
+    def self.parse: (String) -> Batch?
+
+    # A Batch from its Hash form - string or symbol keys - or nil if anything in it is wrong
+    # : (untyped) -> Batch?
+    def self.from_h: (untyped) -> Batch?
+
+    # Reads batches until EOF. An overlong line is skipped, as is a garbled one, and a line
+    # cut off by a writer that died is never yielded
+    # : (IO, ?limit: Integer) { (Batch) -> void } -> void
+    def self.each_batch: (IO, ?limit: Integer) { (Batch) -> void } -> void
+
+    # An exception - its class, message, backtrace and causes - or a message, as an error Hash
+    # : (Exception | String | untyped, ?Integer) -> Hash[Symbol, untyped]
+    def self.error_to_h: (Exception | String | untyped, ?Integer) -> Hash[Symbol, untyped]
+
+    # Every string that leaves or enters goes through here: valid UTF-8, and cut
+    # : (untyped) -> String?
+    def self.text: (untyped) -> String?
+
+    # : (untyped) -> Event?
+    private def self.event: (untyped) -> Event?
+
+    # : (untyped) -> path?
+    private def self.path: (untyped) -> path?
+
+    # : (Symbol, untyped) -> untyped
+    private def self.value: (Symbol, untyped) -> untyped
+
+    # : (untyped, ?stale: bool) -> (Hash[Symbol, untyped] | :invalid)
+    private def self.attributes: (untyped, ?stale: bool) -> (Hash[Symbol, untyped] | :invalid)
+
+    # : (untyped) -> (Hash[Symbol, untyped] | :invalid)
+    private def self.node: (untyped) -> (Hash[Symbol, untyped] | :invalid)
+
+    # : (untyped) -> Integer?
+    private def self.count: (untyped) -> Integer?
+
+    # : (untyped) -> Float?
+    private def self.time: (untyped) -> Float?
+
+    # Integers and floats only - not a Rational, nor a Complex that has no Float to give
+    # : (untyped) -> Float?
+    private def self.number: (untyped) -> Float?
+
+    # : (Hash[untyped, untyped], ?Integer) -> Hash[Symbol, untyped]
+    private def self.error: (Hash[untyped, untyped], ?Integer) -> Hash[Symbol, untyped]
+  end
+end

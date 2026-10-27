@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+# rbs_inline: enabled
 
 begin
   require "progressive_io"
@@ -12,8 +13,17 @@ class TaskProgress
   # a thousandth of the total by default - a loop of small reads over a big file would otherwise
   # commit a batch per read, and every output and browser would get each of them
   class TrackedIO < ::ProgressiveIO
-    STEP_WITHOUT_TOTAL = 64 * 1024
+    STEP_WITHOUT_TOTAL = 64 * 1024 #: Integer
+    private_constant :STEP_WITHOUT_TOTAL
 
+    # @rbs @task: TaskProgress
+    # @rbs @total: Integer?
+    # @rbs @step: Integer
+    # @rbs @furthest: Integer
+    # @rbs @reported: Integer
+
+    # Advances `task` as `io` is read, in steps of `step` bytes - see TaskProgress#track_io, which makes one
+    #: (IO, TaskProgress, ?total: Integer?, ?step: Integer?) -> void
     def initialize(io, task, total: nil, step: nil)
       @task = task
       @total = total
@@ -25,11 +35,20 @@ class TaskProgress
 
     # ProgressiveIO lets these through unreported, and IO.copy_stream reads anything that is not
     # an IO with readpartial
-    %i[readpartial read_nonblock sysread].each do |name|
-      define_method(name) { |*args, **options| super(*args, **options).tap { notify_read } }
-    end
+    # Reads the way IO#readpartial does, and reports how far it got
+    #: (*untyped, **untyped) -> untyped
+    def readpartial(*, **) = super.tap { notify_read }
+
+    # Reads the way IO#read_nonblock does, and reports how far it got
+    #: (*untyped, **untyped) -> untyped
+    def read_nonblock(*, **) = super.tap { notify_read }
+
+    # Reads the way IO#sysread does, and reports how far it got
+    #: (*untyped, **untyped) -> untyped
+    def sysread(*, **) = super.tap { notify_read }
 
     # Reports what was read since the last step
+    #: () -> void
     def flush_progress
       return if @furthest == @reported || @task.finished?
       @task.advance!(@furthest - @reported)
@@ -38,10 +57,12 @@ class TaskProgress
 
     private
 
+    #: (Integer) -> void
     def moved_to(pos)
       return if pos <= @furthest
       @furthest = pos
-      flush_progress if @furthest - @reported >= @step || (@total && @furthest >= @total)
+      total = @total
+      flush_progress if @furthest - @reported >= @step || (total && @furthest >= total)
     end
   end
 end

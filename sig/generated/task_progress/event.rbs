@@ -1,0 +1,20 @@
+# Generated from lib/task_progress/event.rb with RBS::Inline
+
+class TaskProgress
+  class Event < Data
+    attr_reader path: path
+    attr_reader op: Symbol
+    attr_reader value: untyped
+    def self.new: (path: path, op: Symbol, ?value: untyped) -> instance
+    def with: (?path: path, ?op: Symbol, ?value: untyped) -> instance
+  end
+
+  class Event
+    # An event for the node at `path` - its path is frozen, so the event can be shared
+    # : (path: path, op: Symbol, ?value: untyped) -> void
+    def initialize: (path: path, op: Symbol, ?value: untyped) -> void
+  end
+
+  # Every op there is - see Event
+  OPS: Array[Symbol]
+end

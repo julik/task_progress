@@ -1,0 +1,48 @@
+# Generated from lib/task_progress/tracked_io.rb with RBS::Inline
+
+class TaskProgress
+  # A ProgressiveIO that advances a task by how far it has been read. Readers seek (ZipKit reads
+  # the end of an archive first), so only the furthest position counts. The task moves in steps,
+  # a thousandth of the total by default - a loop of small reads over a big file would otherwise
+  # commit a batch per read, and every output and browser would get each of them
+  class TrackedIO < ::ProgressiveIO
+    STEP_WITHOUT_TOTAL: Integer
+
+    @task: TaskProgress
+
+    @total: Integer?
+
+    @step: Integer
+
+    @furthest: Integer
+
+    @reported: Integer
+
+    # Advances `task` as `io` is read, in steps of `step` bytes - see TaskProgress#track_io, which makes one
+    # : (IO, TaskProgress, ?total: Integer?, ?step: Integer?) -> void
+    def initialize: (IO, TaskProgress, ?total: Integer?, ?step: Integer?) -> void
+
+    # ProgressiveIO lets these through unreported, and IO.copy_stream reads anything that is not
+    # an IO with readpartial
+    # Reads the way IO#readpartial does, and reports how far it got
+    # : (*untyped, **untyped) -> untyped
+    def readpartial: (*untyped, **untyped) -> untyped
+
+    # Reads the way IO#read_nonblock does, and reports how far it got
+    # : (*untyped, **untyped) -> untyped
+    def read_nonblock: (*untyped, **untyped) -> untyped
+
+    # Reads the way IO#sysread does, and reports how far it got
+    # : (*untyped, **untyped) -> untyped
+    def sysread: (*untyped, **untyped) -> untyped
+
+    # Reports what was read since the last step
+    # : () -> void
+    def flush_progress: () -> void
+
+    private
+
+    # : (Integer) -> void
+    def moved_to: (Integer) -> void
+  end
+end

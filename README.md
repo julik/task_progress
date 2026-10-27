@@ -21,7 +21,7 @@ The [MANUAL](MANUAL.md) has everything; this page has what you need first.
 gem "task_progress", github: "julik/task_progress"
 ```
 
-Ruby 3.4 or newer. No runtime dependencies.
+Ruby 3.4 or newer. No runtime dependencies. Typed: RBS signatures ship in `sig/generated`, and the code is checked against them with Steep.
 
 ## A bar
 

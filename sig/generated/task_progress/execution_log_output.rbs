@@ -1,0 +1,84 @@
+# Generated from lib/task_progress/execution_log_output.rb with RBS::Inline
+
+class TaskProgress
+  # For a CI log, or anything else that is read top to bottom after the fact: one finished
+  # line per thing worth saying, never a redraw, each line led by the overall percent and
+  # the time since the root opened.
+  #
+  #     [ 42%  1m02s] Import › Rows: row 12000
+  #     [ 50%  1m10s] ✓ Import › Rows  8.1s
+  #     [ 50%  1m11s] ✗ Import › Engine: watermarking failed
+  #     [ 50%  1m12s] ⊘ Import › Publish: Ctrl-C
+  #
+  # A task finishing, failing or being canceled, and a line it `puts`, go out at once and every
+  # time - though of a task and the ones under it ending in one batch, only the task says so. The
+  # rest - notes and counts - are only ever the latest news, so it says at most one of those
+  # per `interval`, the newest. With nothing to say for `heartbeat` it says it is still
+  # going, so a CI runner watching for output does not take a long quiet step for a hang
+  class ExecutionLogOutput
+    @thread: Thread?
+
+    @closed: bool
+
+    @said_at: Float
+
+    @pending: [ path, String? ]?
+
+    @log: Log?
+
+    @wake: Thread::ConditionVariable
+
+    @lock: Thread::Mutex
+
+    @clock: ^() -> Float
+
+    @heartbeat: Integer | Float
+
+    @interval: Integer | Float
+
+    @io: IO | StringIO
+
+    # Writes to `io`: news at most every `interval` seconds, and that it is still going after `heartbeat` seconds of quiet
+    # : (?IO | StringIO, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?clock: ^() -> Float) -> void
+    def initialize: (?IO | StringIO, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?clock: ^() -> Float) -> void
+
+    # Takes one batch, see Log#add_output
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+
+    # Says what is still pending, and stops
+    # : () -> void
+    def close: () -> void
+
+    private
+
+    # : () -> void
+    def run: () -> void
+
+    # : (?flush: bool) -> void
+    def close_locked: (?flush: bool) -> void
+
+    # : () -> void
+    def say_pending: () -> void
+
+    # : (State, String) -> void
+    def say: (State, String) -> void
+
+    ENDINGS: Array[Symbol]
+
+    # : (State, Event) -> String
+    def ending: (State, Event) -> String
+
+    # The task's name, after the names of every task it is under
+    # : (State, path) -> String
+    def names: (State, path) -> String
+
+    # : (Node) -> String
+    def count: (Node) -> String
+
+    # A task that reported nothing before it finished started when it finished, as far as the
+    # tree knows - so it took as long as it was open
+    # : (Node?) -> String
+    def took: (Node?) -> String
+  end
+end

@@ -69,7 +69,7 @@ class AutoloadTest < Minitest::Test
     names = out.lines.grep(/ (ok|failed)$/).map { it.split.first.to_sym }
     expected = %i[VERSION Event OPS Batch State Node Journal Wire Log Transaction Branch Mount Squasher
       SummaryOutput NDJSONOutput PublishingOutput BufferedOutput RactorOutput TerminalOutput ExecutionLogOutput
-      SSE Refinements CancelToken TrackedIO RACTORS Canceled SCALE]
+      SSE Refinements CancelToken TrackedIO RACTORS Canceled]
     assert_empty expected - names, out
     refute_match(/failed/, out)
   end

@@ -27,3 +27,12 @@ jobs:
         with:
           node-version: "22"
       - run: bundle exec rake test
+      # The types live next to the code; sig/generated is written from them and committed, so it
+      # must come out the same here as it was committed
+      - name: Types
+        run: |
+          bundle exec rake rbs
+          git diff --exit-code sig/generated || (echo "sig/generated is out of date - run bundle exec rake rbs" && exit 1)
+          bundle exec steep check
+      - name: Docs
+        run: bundle exec rake doc:check

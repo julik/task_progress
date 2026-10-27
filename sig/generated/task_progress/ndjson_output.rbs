@@ -1,0 +1,18 @@
+# Generated from lib/task_progress/ndjson_output.rb with RBS::Inline
+
+class TaskProgress
+  # One batch per line, for a Mount at the other end of a pipe. Each line goes out in one
+  # write, so a reader never sees a batch half-written unless the writer died writing it -
+  # and Wire.each_batch drops that one
+  class NDJSONOutput
+    @io: IO | StringIO
+
+    # Writes to `io`, which it makes sync
+    # : (IO | StringIO) -> void
+    def initialize: (IO | StringIO) -> void
+
+    # Writes the batch as one line
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+  end
+end
