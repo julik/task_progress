@@ -225,34 +225,4 @@ class TaskProgress
 
     def adopt(parent, path) = parent.children << path.last
   end
-
-  # One task, as the tree holds it. `sealed` holds the task's Mount when one feeds it, and
-  # `autofinish` whether it finishes at its total - neither goes over the wire
-  Node = Struct.new(*State::FIELDS, :children, :sealed, :autofinish) do
-    def finished? = status == :done || status == :failed || status == :canceled
-
-    def to_h
-      State::FIELDS.to_h { [it, self[it]] }.compact.tap do |h|
-        h.delete(:stale) unless stale
-        h.delete(:indeterminate) unless indeterminate
-        h.delete(:cancelable) unless cancelable
-        h.delete(:weight) if weight == 1.0
-      end
-    end
-
-    def deep_dup = dup.tap { it.children = children.dup }
-  end
-
-  # The changes one transaction made, so that it can be undone whole
-  class Journal
-    def initialize = @saved = {}
-
-    def touch(path, node)
-      @saved[path] = node&.deep_dup unless @saved.key?(path)
-    end
-
-    def rollback(nodes)
-      @saved.each { |path, node| node ? nodes[path] = node : nodes.delete(path) }
-    end
-  end
 end

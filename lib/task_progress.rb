@@ -1,24 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "task_progress/version"
-require_relative "task_progress/event"
-require_relative "task_progress/state"
-require_relative "task_progress/wire"
-require_relative "task_progress/log"
-require_relative "task_progress/branch"
-require_relative "task_progress/mount"
-require_relative "task_progress/squasher"
-require_relative "task_progress/summary_output"
-require_relative "task_progress/ndjson_output"
-require_relative "task_progress/publishing_output"
-require_relative "task_progress/buffered_output"
-require_relative "task_progress/ractor_output"
-require_relative "task_progress/terminal_output"
-require_relative "task_progress/execution_log_output"
-require_relative "task_progress/sse"
-require_relative "task_progress/refinements"
-require_relative "task_progress/cancel_token"
-
 # Hierarchical progress for task trees. A TaskProgress is a handle onto one node of a tree; the
 # tree itself is a Log of change events, applied and numbered under one lock, which outputs
 # receive in order - to draw a terminal, write to a pipe, stream to a browser, or feed a Mount
@@ -29,6 +10,49 @@ require_relative "task_progress/cancel_token"
 #     root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
 #   end
 class TaskProgress
+  # Each file loads when its constant is first used, along with what it needs from the standard
+  # library (json, openssl), so a program pays only for the parts it touches
+  autoload :VERSION,            File.expand_path("task_progress/version", __dir__)
+  autoload :Event,              File.expand_path("task_progress/event", __dir__)
+  autoload :OPS,                File.expand_path("task_progress/event", __dir__)
+  autoload :Batch,              File.expand_path("task_progress/batch", __dir__)
+  autoload :State,              File.expand_path("task_progress/state", __dir__)
+  autoload :Node,               File.expand_path("task_progress/node", __dir__)
+  autoload :Journal,            File.expand_path("task_progress/journal", __dir__)
+  autoload :Wire,               File.expand_path("task_progress/wire", __dir__)
+  autoload :Log,                File.expand_path("task_progress/log", __dir__)
+  autoload :Transaction,        File.expand_path("task_progress/transaction", __dir__)
+  autoload :Branch,             File.expand_path("task_progress/branch", __dir__)
+  autoload :Mount,              File.expand_path("task_progress/mount", __dir__)
+  autoload :Squasher,           File.expand_path("task_progress/squasher", __dir__)
+  autoload :SummaryOutput,      File.expand_path("task_progress/summary_output", __dir__)
+  autoload :NDJSONOutput,       File.expand_path("task_progress/ndjson_output", __dir__)
+  autoload :PublishingOutput,   File.expand_path("task_progress/publishing_output", __dir__)
+  autoload :BufferedOutput,     File.expand_path("task_progress/buffered_output", __dir__)
+  autoload :RactorOutput,       File.expand_path("task_progress/ractor_output", __dir__)
+  autoload :TerminalOutput,     File.expand_path("task_progress/terminal_output", __dir__)
+  autoload :ExecutionLogOutput, File.expand_path("task_progress/execution_log_output", __dir__)
+  autoload :SSE,                File.expand_path("task_progress/sse", __dir__)
+  autoload :Refinements,        File.expand_path("task_progress/refinements", __dir__)
+  autoload :CancelToken,        File.expand_path("task_progress/cancel_token", __dir__)
+  autoload :TrackedIO,          File.expand_path("task_progress/tracked_io", __dir__)
+
+  # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
+  # constructor (Data#initialize, say) while Ractors run brings the process down, sometimes
+  # minutes later and in unrelated code. Ruby 4.0 has it fixed, and the Ractor::Port API with it
+  RACTORS = RUBY_VERSION.split(".").first.to_i >= 4
+
+  # Loads every part now rather than on first use - before forking workers, say, so they share
+  # the loaded code. TrackedIO is left out when the progressive_io gem is not there
+  def self.eager_load!
+    constants.each do |name|
+      const_get(name)
+    rescue LoadError
+      raise unless name == :TrackedIO
+    end
+    self
+  end
+
   # Raised at whoever works on a task that was called off, so the work stops at its next step.
   # An Exception rather than a StandardError, like Interrupt: a `rescue => e` around one step
   # should not swallow it and carry on with the next
@@ -385,6 +409,7 @@ class TaskProgress
   # The root itself, `[]`, is what the parent mounted, and only the parent asks for it: the
   # mount was ended there, so the root is canceled whether it is cancelable or not
   def accept_cancel_requests(io)
+    require "json"
     Thread.new do
       Thread.current.report_on_exception = false
       io.each_line(Wire::TEXT_LIMIT) do |line|
@@ -430,7 +455,6 @@ class TaskProgress
   # progressive_io gem, and an IO that can tell its position - for a pipe or a socket, call
   # `advance!` with each chunk instead
   def track_io(io, total: nil, step: nil)
-    require_relative "task_progress/tracked_io"
     raise ArgumentError, "#{io.class} cannot tell its position, so reading it cannot be tracked - call advance! with each chunk instead" unless positioned?(io)
     total ||= io.size if io.respond_to?(:size)
     meta(total:, unit: "bytes", indeterminate: total.nil?)

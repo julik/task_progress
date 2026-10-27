@@ -11,3 +11,8 @@ group :examples do
   gem "puma"
   gem "rackup"
 end
+
+group :test do
+  # The browser tests drive the bench in a headless Chrome; without one they skip
+  gem "ferrum", "~> 0.17"
+end

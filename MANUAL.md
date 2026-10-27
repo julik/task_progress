@@ -32,6 +32,8 @@ A task is named by its **path** from the root: `[]` is the root, `["x3k0", "00af
 
 Timestamps are for display only. Order is `seq`, `prev`, the order of events in a batch, and the order children were opened in.
 
+`require "task_progress"` loads one file. Each class loads when it is first used, and brings what it needs from the standard library with it - `json` comes with `Wire` and `Mount`, `openssl` with `CancelToken` - so a program that only keeps a tree in memory never loads either. `TaskProgress.eager_load!` loads everything at once, for a server that forks its workers and wants them to share the code; `TrackedIO` is skipped when `progressive_io` is not installed.
+
 ## Tasks
 
 ```ruby
@@ -251,6 +253,8 @@ mount << port.receive
 ```
 
 Ractors need Ruby 4.0. On 3.4 they corrupt the VM - a `super` into a C constructor while Ractors run brings the process down, sometimes minutes later - so `RactorOutput` refuses to start there. Everything else runs on 3.4.
+
+A Ractor may be the first to touch a class - `RactorOutput`, `Log`, `State` - and so load it: on 4.0 a `require` from a Ractor other than the main one is handed to the main Ractor, which loads the file while the Ractor waits. The main Ractor can be blocked on `port.receive` and it still works. To keep loading out of the Ractors altogether, call `TaskProgress.eager_load!` before starting them.
 
 ## Canceling
 
@@ -567,6 +571,8 @@ Reading is for writers we do not trust - a subprocess, a stream relayed from els
 - `TaskProgress::Log.new(clock: -> { t += 1.0 })` makes times predictable, and `random: Random.new(1)` task ids.
 - `root.log.snapshot` is the tree as it stands, and `TaskProgress::State.fold(events)` folds events of your own.
 - An output is any lambda: `root.add_output { |batch, _| batches << batch }`.
+
+The gem's own suite also drives the bench in a headless Chrome, through [Ferrum](https://github.com/rubycdp/ferrum) (`test/browser_test.rb`): it starts the bench on Puma in the test process, clicks a scenario, presses cancel buttons and reads the rows off both panes - that they end alike, that a cancel reaches the server, that a cut stream resumes whole, and that work grafted from the page holds the job below 100%. Without a Chrome it skips.
 
 ## The bench
 

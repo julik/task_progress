@@ -5,6 +5,7 @@
 - **No deep namespaces.** Every class and module sits directly under `TaskProgress`: `TaskProgress::PublishingOutput`, never `TaskProgress::Outputs::Publish`. A class is not nested in another class either - `TaskProgress::Transaction`, not `TaskProgress::Log::Transaction`.
 - Group by name, not by module: what a class is goes at the end of its name. Outputs end in `Output` (`TerminalOutput`, `BufferedOutput`).
 - One class per file, flat in `lib/task_progress/`, named after the class: `PublishingOutput` lives in `publishing_output.rb`.
+- Nothing is required up front: a new file gets an `autoload` in `lib/task_progress.rb`, and requires the stdlib it needs (`json`, `openssl`) itself.
 
 ## Ruby
 
@@ -14,7 +15,7 @@
 
 ## Tests
 
-`bundle exec rake test` runs the Ruby tests and the JS ones (`test/js`, through Node). The parity test holds the browser client's fold to the Ruby one for random trees: a change to how a tree folds or how percents work goes into `State` and `js/task_tree.js` together.
+`bundle exec rake test` runs the Ruby tests, the JS ones (`test/js`, through Node), and the browser tests (`test/browser_test.rb`), which drive the bench in a headless Chrome through Ferrum - clicking what a person would click, and reading what they would see. They skip without a Chrome; a change to the renderers or the bench gets one there. The parity test holds the browser client's fold to the Ruby one for random trees: a change to how a tree folds or how percents work goes into `State` and `js/task_tree.js` together.
 
 A change to the wire format touches `Wire` (what a reader accepts), `js/task_tree.js`, and the op table in the MANUAL.
 
