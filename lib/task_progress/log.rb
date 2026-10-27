@@ -63,21 +63,24 @@ class TaskProgress
     def append(*events) = transaction { |tx| events.each { tx << it } }
 
     # An output is anything with `call(batch, log)`. Unless `replay: false`, it first gets the
-    # tree so far as one squashed batch, `prev` 0, and then every batch after it
-    def subscribe(output = nil, replay: true, &block)
+    # tree so far as one squashed batch, `prev` 0, and then every batch after it. With a `path`
+    # it gets only that subtree, as a tree of its own - see Branch
+    def add_output(output = nil, replay: true, path: [], &block)
       output ||= block
       @lock.synchronize do
-        if replay && !@state.empty?
-          @outbox << [Batch.new(log: @id, prev: 0, seq: @seq, at: @clock.call, events: @state.squash.freeze), [output].freeze]
+        target = path.empty? ? output : Branch.new(output, path.dup.freeze, @id, @seq)
+        if replay && @state.key?(path)
+          @outbox << [Batch.new(log: @id, prev: 0, seq: @seq, at: @clock.call, events: @state.squash(path).freeze), [target].freeze]
         end
-        @outputs = [*@outputs, output].freeze
+        @outputs = [*@outputs, target].freeze
       end
       deliver
       output
     end
 
-    def unsubscribe(output)
-      @lock.synchronize { @outputs = (@outputs - [output]).freeze }
+    # Takes the output as it was given to `add_output`
+    def remove_output(output)
+      @lock.synchronize { @outputs = @outputs.reject { it == output || (it.is_a?(Branch) && it.output == output) }.freeze }
     end
 
     # A frozen copy of the tree, safe to read from anywhere - and from inside an output too,
@@ -87,9 +90,13 @@ class TaskProgress
       @lock.synchronize { @snapshot = nil if @snapshot&.first != @seq; (@snapshot ||= [@seq, @state.snapshot]).last }
     end
 
-    # The tree so far as one batch of puts - what a late reader starts from
-    def squashed
-      @lock.synchronize { Batch.new(log: @id, prev: 0, seq: @seq, at: @clock.call, events: @state.squash.freeze) }
+    # The tree so far as one batch of puts - what a late reader starts from. With a `path`, the
+    # subtree there, rooted at `[]` the way a Branch would send it
+    def squashed(path = [])
+      @lock.synchronize do
+        events = @state.squash(path).map { it.with(path: it.path.drop(path.length).freeze) }
+        Batch.new(log: path.empty? ? @id : Branch.id(@id, path), prev: 0, seq: @seq, at: @clock.call, events: events.freeze)
+      end
     end
 
     def inspect = "#<#{self.class} #{@id} seq=#{@seq}>"

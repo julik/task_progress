@@ -114,8 +114,8 @@ class TaskProgress
       self
     end
 
-    # The state as a list of puts, one per node, in pre-order
-    def squash = each.map { |path, node| Event.new(path:, op: :put, value: node.to_h) }
+    # The state as a list of puts, one per node, in pre-order - or just the subtree at `path`
+    def squash(path = []) = each(path).map { |path, node| Event.new(path:, op: :put, value: node.to_h) }
 
     def complete?(path = [], node = @nodes[path])
       return false unless node

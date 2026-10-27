@@ -105,7 +105,7 @@ class MountTest < Minitest::Test
     local_time = 5_005.0
     remote_time = 1_035.0
     batches, output = recording
-    child.log.subscribe(output, replay: false)
+    child.log.add_output(output, replay: false)
     a.done!
     mount << batches.last
     assert_in_delta 25.0, mount.task.subtasks.first.node.then { it.finished_at - it.started_at }, 0.001

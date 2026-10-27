@@ -80,12 +80,12 @@ class LogTest < Minitest::Test
     assert(batches.each_cons(2).all? { |a, b| b.prev == a.seq && b.seq == a.seq + 1 })
   end
 
-  def test_a_late_subscriber_gets_the_squash_then_the_rest_without_overlap
+  def test_a_late_output_gets_the_squash_then_the_rest_without_overlap
     root = TaskProgress.new("root")
     a = root.subtask("A")
     a.update_to(percent: 30)
     batches, output = recording
-    root.log.subscribe(output)
+    root.log.add_output(output)
     a.update_to(percent: 60)
     assert_equal [0, 3], [batches.first.prev, batches.first.seq]
     assert batches.first.events.all? { it.op == :put }
@@ -93,14 +93,14 @@ class LogTest < Minitest::Test
     assert_equal 2, batches.length
   end
 
-  def test_subscribing_while_others_commit_never_duplicates_or_drops
+  def test_adding_an_output_while_others_commit_never_duplicates_or_drops
     root = TaskProgress.new("root")
     workers = 4.times.map { root.subtask("w#{it}", total: 200) }
     threads = workers.map { |w| Thread.new { 200.times { w.tick! } } }
     late = 5.times.map do
       sleep 0.001
       batches, output = recording
-      root.log.subscribe(output)
+      root.log.add_output(output)
       batches
     end
     threads.each(&:join)
@@ -138,7 +138,7 @@ class LogTest < Minitest::Test
   def test_a_slow_output_never_delays_a_reader
     gate = Queue.new
     root = TaskProgress.new("root")
-    root.log.subscribe(->(batch, _) { gate.pop if batch.events.any? { it.op == :set } }, replay: false)
+    root.log.add_output(->(batch, _) { gate.pop if batch.events.any? { it.op == :set } }, replay: false)
     writer = Thread.new { root.update_to(percent: 10) }
     sleep 0.01
     assert_equal 10, root.percent, "the change is in while its output is still busy"

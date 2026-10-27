@@ -28,12 +28,30 @@ class SSETest < Minitest::Test
     assert_empty root.log.instance_variable_get(:@outputs), "the stream let go of the log"
   end
 
+  def test_streams_a_subtask_as_its_own_tree_until_it_finishes
+    root = TaskProgress.new("job")
+    root.subtask("Other")
+    upload = root.subtask("Upload")
+    upload.subtask("Part")
+    reader = Thread.new { read_frames(TaskProgress::SSE.new(upload)) }
+    sleep 0.02
+    root.subtasks.first.note("not ours")
+    upload.done!
+    batches = reader.value.drop(1).map { batch_of(it) }
+
+    assert_equal [[], [0]], batches.first.events.map(&:path)
+    assert_equal [[[], :done]], batches.last.events.map { [it.path, it.op] }
+    assert_equal 2, batches.length
+    refute root.finished?, "the stream ends with the subtask, not the root"
+    assert_empty root.log.instance_variable_get(:@outputs)
+  end
+
   # The snapshot runs ahead of delivery: with an output before ours still busy with the last
   # batch, the tree already reads finished while that batch has not reached us
   def test_the_stream_does_not_end_before_the_finishing_batch_arrives
     gate = Queue.new
     root = TaskProgress.new("job")
-    root.log.subscribe(->(batch, _) { gate.pop if batch.events.any? { it.path.empty? && it.op == :done } }, replay: false)
+    root.log.add_output(->(batch, _) { gate.pop if batch.events.any? { it.path.empty? && it.op == :done } }, replay: false)
     a = root.subtask("A")
     reader = Thread.new { read_frames(TaskProgress::SSE.new(root)) }
     sleep 0.02

@@ -53,9 +53,11 @@ Ractors need Ruby 4.0. On 3.4 they corrupt the VM (a `super` into a C constructo
 ## To a browser
 
 ```ruby
-[200, TaskProgress::SSE::HEADERS, TaskProgress::SSE.new(root)]          # Rack
-root.log.subscribe(TaskProgress::Outputs::Publish.new(sossego_stream))  # a job elsewhere
+[200, TaskProgress::SSE::HEADERS, TaskProgress::SSE.new(root)]      # Rack
+root.add_output(TaskProgress::Outputs::Publish.new(sossego_stream))  # a job elsewhere
 ```
+
+Any task can be streamed on its own: `SSE.new(upload)` or `upload.add_output(output)` sends just that subtree, with `upload` as its root - first squashed, then live. Batches elsewhere in the tree are left out, and the branch numbers its batches itself, so a reader sees no gaps. Feed it to a Mount and the subtree is grafted back whole.
 
 `examples/web` has a Stimulus and a React renderer on a shared client (`task_tree.js`), which folds batches the same way the Ruby side does. A test holds the two to the same result. The terminal demo is `ruby -Ilib examples/cli_demo.rb`.
 

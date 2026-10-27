@@ -5,6 +5,7 @@ require_relative "task_progress/event"
 require_relative "task_progress/state"
 require_relative "task_progress/wire"
 require_relative "task_progress/log"
+require_relative "task_progress/branch"
 require_relative "task_progress/mount"
 require_relative "task_progress/outputs"
 require_relative "task_progress/sse"
@@ -55,7 +56,7 @@ class TaskProgress
   def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, &summary)
     @log = log
     @path = [].freeze
-    [*outputs, (Outputs::Summary.new(&summary) if summary)].compact.each { @log.subscribe(it) }
+    [*outputs, (Outputs::Summary.new(&summary) if summary)].compact.each { @log.add_output(it) }
     @log.append(Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:)))
   end
 
@@ -94,6 +95,12 @@ class TaskProgress
   def root = TaskProgress.handle(@log, [])
 
   def subtasks = @log.snapshot.children(@path).map { TaskProgress.handle(@log, it) }
+
+  # Sends this task's subtree to an output, as a tree of its own rooted at `[]` - for the root
+  # that is the whole tree. See Log#add_output
+  def add_output(output = nil, replay: true, &block) = @log.add_output(output, replay:, path: @path, &block)
+
+  def remove_output(output) = @log.remove_output(output)
 
   # A child task. `total:` makes it counted (drive it with `advance!`), `indeterminate: true`
   # one with no measure of its own, and `weight:` how much of the parent it is. With a block
