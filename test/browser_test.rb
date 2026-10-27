@@ -23,7 +23,8 @@ class BrowserTest < Minitest::Test
     @server.add_tcp_listener("127.0.0.1", 0)
     @server.run
     @base = "http://127.0.0.1:#{@server.connected_ports.first}"
-    @browser = Ferrum::Browser.new(headless: true, timeout: 15, window_size: [1400, 1000], browser_options: {"no-sandbox" => nil})
+    @browser = BrowserTest.browser
+    @browser.reset
     @errors = []
     page.on("Runtime.exceptionThrown") { |params| @errors << params.dig("exceptionDetails", "exception", "description") }
     page.on("Runtime.consoleAPICalled") { |params| @errors << params["args"].map { it["value"] }.join(" ") if params["type"] == "error" }
@@ -33,8 +34,14 @@ class BrowserTest < Minitest::Test
     skip "there is no Chrome to drive"
   end
 
+  # One Chrome for every test, started once: a cold one on a CI runner can take longer than
+  # Ferrum's 10 seconds to come up
+  def self.browser
+    @browser ||= Ferrum::Browser.new(headless: true, timeout: 15, process_timeout: 60, window_size: [1400, 1000],
+      browser_options: {"no-sandbox" => nil}).tap { |browser| Minitest.after_run { browser.quit } }
+  end
+
   def teardown
-    @browser&.quit
     @server&.stop(true)
     @app&.jobs&.each { it.thread.kill }
   end
