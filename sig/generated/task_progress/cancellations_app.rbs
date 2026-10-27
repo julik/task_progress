@@ -1,0 +1,37 @@
+# Generated from lib/task_progress/cancellations_app.rb with RBS::Inline
+
+class TaskProgress
+  # A Rack app that takes the cancel buttons HTMLRenderer draws, for a tree that lives in another
+  # process - a job broadcasting with TaskProgress.broadcast. It cannot cancel anything itself:
+  # it checks the request's token, and leaves the request in the store the job watches. The job
+  # decides, as it does for any request (see TaskProgress#request_cancel), and the cancel comes
+  # back in its next frame.
+  #
+  # A Turbo form submission is answered with an empty Turbo Stream, which changes nothing on the
+  # page - the frame that follows does. Anything else gets 202 and a little JSON
+  class CancellationsApp
+    @store: TurboStreamOutput::_Store
+
+    @tokens: CancelToken
+
+    # Leaves requests in `store`, for tokens `tokens` issued
+    # : (store: TurboStreamOutput::_Store, tokens: CancelToken) -> void
+    def initialize: (store: TurboStreamOutput::_Store, tokens: CancelToken) -> void
+
+    # Takes a POST with `path` - the task's ids joined with a dash - and `token`, as a form or JSON
+    # : (Hash[String, untyped]) -> [Integer, Hash[String, String], Array[String]]
+    def call: (Hash[String, untyped]) -> [ Integer, Hash[String, String], Array[String] ]
+
+    # Where a request to cancel the task at `path` waits, for the tree stored under `key`
+    # : (String, path) -> String
+    def self.request_key: (String, path) -> String
+
+    private
+
+    # : (Hash[String, untyped]) -> Hash[String, untyped]
+    def params: (Hash[String, untyped]) -> Hash[String, untyped]
+
+    # : (Integer, Hash[Symbol, untyped]) -> [Integer, Hash[String, String], Array[String]]
+    def respond: (Integer, Hash[Symbol, untyped]) -> [ Integer, Hash[String, String], Array[String] ]
+  end
+end

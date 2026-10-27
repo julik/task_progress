@@ -1,0 +1,14 @@
+# Generated from lib/task_progress/turbo_helper.rb with RBS::Inline
+
+class TaskProgress
+  # View helpers, in every view once the gem is in a Rails app
+  module TurboHelper
+    # The tree a job broadcasts with `TaskProgress.broadcast(record, ...)`, kept up to date: drawn
+    # as it stood at its last frame, and subscribed to every frame after that. Needs turbo-rails,
+    # and `task_tree.css` on the page - plus `task_progress_clock.js`, for elapsed times to tick
+    #
+    #     <%= task_progress_tree @import %>
+    # : (untyped, ?store: untyped) -> String
+    def task_progress_tree: (untyped, ?store: untyped) -> String
+  end
+end

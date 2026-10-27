@@ -1,0 +1,50 @@
+# Generated from lib/task_progress/turbo_sse.rb with RBS::Inline
+
+class TaskProgress
+  # A Rack body streaming a tree as Turbo Streams over Server-Sent Events, for a page that shows
+  # it with `<turbo-stream-source src="...">` - Turbo with no Action Cable, and no JavaScript of
+  # your own. Every frame replaces the whole tree by morphing, at most every `interval` seconds
+  # however fast the tree changes; a reconnect starts with the whole tree, so nothing is ever
+  # missed for good. Given a subtask, it streams that branch alone.
+  #
+  #   [200, TaskProgress::TurboSSE::HEADERS, TaskProgress::TurboSSE.new(task, renderer:)]
+  #
+  # Once the task finishes it sends the last frame, removes the element with the id `source` -
+  # the `<turbo-stream-source>`, so the browser does not reconnect to a finished stream - and ends
+  class TurboSSE
+    # What a Turbo SSE response is sent with - the same as an SSE one
+    HEADERS: Hash[String, String]
+
+    @task: TaskProgress
+
+    @renderer: TurboStreamOutput::_Renderer
+
+    @interval: Integer | Float
+
+    @heartbeat: Integer | Float
+
+    @source: String?
+
+    # Streams `task`, drawn by `renderer` - an HTMLRenderer, or anything that answers `id` and
+    # `render(snapshot, from)`, `from` being the task's path. `source` is the id of the
+    # `<turbo-stream-source>` to remove at the end
+    # : (TaskProgress, renderer: TurboStreamOutput::_Renderer, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?source: String?) -> void
+    def initialize: (TaskProgress, renderer: TurboStreamOutput::_Renderer, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?source: String?) -> void
+
+    # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
+    # : () { (String) -> void } -> void
+    def each: () { (String) -> void } -> void
+
+    private
+
+    # : () -> String
+    def frame: () -> String
+
+    # : (State) -> String
+    def render: (State) -> String
+
+    # An unnamed event - what `<turbo-stream-source>` listens for
+    # : (String) -> String
+    def message: (String) -> String
+  end
+end

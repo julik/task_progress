@@ -42,6 +42,8 @@ class BrowserTest < Minitest::Test
   end
 
   def teardown
+    # A job still running keeps its streams open, and the server would wait on them to stop
+    @app&.jobs&.each { it.root.cancel!("The test is over") }
     @server&.stop(true)
     @app&.jobs&.each { it.thread.kill }
   end
@@ -85,6 +87,25 @@ class BrowserTest < Minitest::Test
     wait_for(message: "the job never finished in both panes") { done?("#stimulus-tree") && done?("#react-tree") }
     assert_equal rows("#stimulus-tree"), rows("#react-tree")
     assert_equal job.root.log.snapshot.size, rows("#stimulus-tree").length, "one row per task"
+    assert_empty @errors
+  end
+
+  # The third pane is Turbo: HTML the server draws, streamed with TurboSSE, and no client of ours
+  def test_the_turbo_pane_ends_up_as_the_other_two(names_and_statuses = ->(pane) { rows(pane).map { it.first(2) } })
+    start("transaction", speed: "4")
+    wait_for(message: "the Turbo pane never finished") { done?("#turbo-tree") && done?("#stimulus-tree") }
+    assert_equal names_and_statuses.("#stimulus-tree"), names_and_statuses.("#turbo-tree")
+    wait_for(message: "the stream source never took itself off") { page.at_css("#turbo-source").nil? }
+    assert_empty @errors
+  end
+
+  def test_a_turbo_cancel_button_is_a_form_that_works
+    job = start("workers", speed: "0.5")
+    wait_for { row("#turbo-tree", "worker 4")&.first == "active" }
+    press_cancel("#turbo-tree", "worker 4")
+    worker = wait_for { job.root.subtasks.find { it.name == "worker 4" && it.canceled? } }
+    assert_equal "Canceled from the browser", worker.message
+    wait_for(message: "the cancel never reached the Turbo pane") { row("#turbo-tree", "worker 4")&.first == "canceled" }
     assert_empty @errors
   end
 

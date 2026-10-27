@@ -19,6 +19,7 @@ require_relative "../scenarios"
 #                                its ids joined with a dash and `token` the job's cancel_token. Asking
 #                                again for the same task gives back the same cancellation
 #   GET  /jobs/:id/cancellations/:id   one cancellation, and how it went
+#   GET  /jobs/:id/turbo         its tree as Turbo Streams over SSE, for <turbo-stream-source>
 #   GET  /jobs/:id/events        its tree as SSE; with ?drop_after=N the stream is cut after N
 #                                frames, so the browser has to reconnect and resume
 class BenchApp
@@ -78,11 +79,21 @@ class BenchApp
       job.thread.raise(Interrupt, "Cancelled from the bench") if job.thread.alive?
       json(describe(job))
     in ["POST", %r{\A/jobs/(\w+)/cancellations\z}]
-      cancel(request, $1)
+      answer = cancel(request, $1)
+      # A Turbo form gets an empty Turbo Stream back, whatever became of it: the next frame shows it
+      if request.get_header("HTTP_ACCEPT").to_s.include?("turbo-stream")
+        [answer.first.clamp(200, 299), {"content-type" => "text/vnd.turbo-stream.html"}, [""]]
+      else
+        answer
+      end
     in ["GET", %r{\A/jobs/(\w+)/cancellations/([\w-]+)\z}]
       job = find($1)
       cancellation = job&.cancellations&.[]($2) or return json({error: "no such cancellation"}, 404)
       json(settle(job, cancellation).to_h)
+    in ["GET", %r{\A/jobs/(\w+)/turbo\z}]
+      job = find($1) or return [404, {}, ["no such job"]]
+      renderer = TaskProgress::HTMLRenderer.new(id: "turbo-tree", cancel_url: "/jobs/#{job.id}/cancellations", cancel_token: @tokens.issue(job.id))
+      [200, TaskProgress::TurboSSE::HEADERS.dup, TaskProgress::TurboSSE.new(job.root, renderer:, source: "turbo-source")]
     in ["GET", %r{\A/jobs/(\w+)/events\z}]
       job = find($1) or return [404, {}, ["no such job"]]
       drop_after = Integer(request.params["drop_after"], exception: false)

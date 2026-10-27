@@ -26,6 +26,8 @@
 .row button.cancel:hover, .row button.cancel:focus-visible { color: var(--fail); background: var(--track); }
 .row button.cancel:disabled { cursor: progress; opacity: 0.4; }
 .row button.cancel[hidden] { display: inline-flex; visibility: hidden; }
+/* Server-drawn rows (TaskProgress::HTMLRenderer) put the button in a form, or leave the column empty */
+.row .cancel-slot { display: inline-flex; width: 20px; height: 20px; margin: 0; }
 .bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--fill); transition: width 0.2s ease-out; }
 .row.failed .bar > span { background: var(--fail); }

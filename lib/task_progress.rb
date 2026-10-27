@@ -50,6 +50,13 @@ class TaskProgress
   autoload :Refinements,        "#{PARTS}/refinements"
   autoload :CancelToken,        "#{PARTS}/cancel_token"
   autoload :TrackedIO,          "#{PARTS}/tracked_io"
+  autoload :HTMLRenderer,       "#{PARTS}/html_renderer"
+  autoload :TurboStreamOutput,  "#{PARTS}/turbo_stream_output"
+  autoload :TurboSSE,           "#{PARTS}/turbo_sse"
+  autoload :MemoryStore,        "#{PARTS}/memory_store"
+  autoload :CancellationsApp,   "#{PARTS}/cancellations_app"
+  autoload :RailsDefaults,      "#{PARTS}/rails_defaults"
+  autoload :TurboHelper,        "#{PARTS}/turbo_helper"
 
   # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
   # constructor (Data#initialize, say) while Ractors run brings the process down, sometimes
@@ -167,6 +174,59 @@ class TaskProgress
   #: (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
   def self.iterate(collection, name = File.basename($PROGRAM_NAME), total: TaskProgress.size_of(collection), step: 1, **, &block)
     bar(name, total:, **).iterate(collection, step:, &block)
+  end
+
+  # A root whose tree is drawn in pages with Turbo, from wherever it runs - a job, say. Every
+  # frame is the whole tree as HTML (see HTMLRenderer), sent as a Turbo Stream at most every
+  # `interval` seconds, and kept in `store` for a page to draw before the first one arrives.
+  # Cancel buttons post to `cancel_url`; the request waits in `store`, where this checks for it
+  # every `poll` seconds - so it works across processes too. With a block, the block is the
+  # root's work, as with `cli`.
+  #
+  #     TaskProgress.broadcast(import, "Importing") { |root| ... }   # in a Rails job
+  #     <%= task_progress_tree import %>                               # in its page
+  #
+  # In Rails, the target is a record, and the rest comes from RailsDefaults: Turbo::StreamsChannel,
+  # Rails.cache and the route the Railtie adds. Outside Rails the target is the element's id, and
+  # `broadcast:` - called with each frame - is up to you
+  #: (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) -> TaskProgress
+  #: [T] (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) { (TaskProgress) -> T } -> T?
+  def self.broadcast(target, name = File.basename($PROGRAM_NAME), broadcast: nil, store: nil, tokens: nil, cancel_url: nil, renderer: nil,
+    interval: 0.25, poll: 1, expires_in: 86_400, **attributes, &block)
+    defaults = RailsDefaults.for(target)
+    send = broadcast || defaults[:broadcast] or raise ArgumentError, "Give it broadcast: - outside Rails with turbo-rails, there is nothing to send frames to"
+    store ||= defaults[:store]
+    tokens ||= defaults[:tokens]
+    cancel_url ||= defaults[:cancel_url]
+    key = RailsDefaults.key(target)
+    renderer ||= HTMLRenderer.new(id: RailsDefaults.id(target), cancel_url: (cancel_url if tokens), cancel_token: tokens&.issue(key, expires_in:))
+    output = BufferedOutput.new(TurboStreamOutput.new(renderer:, broadcast: send, store:, key:), interval:)
+    root = new(name, outputs: [output], **attributes)
+    watch_cancellations(root, store, key, poll) if store && tokens
+    return finish_at_exit(root, output) unless block
+    begin
+      root.run { block.call(it) }
+    ensure
+      close(output)
+    end
+  end
+
+  # Picks up the requests CancellationsApp leaves in the store, until the root has ended
+  #: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
+  def self.watch_cancellations(root, store, key, poll)
+    Thread.new do
+      Thread.current.report_on_exception = false
+      until root.finished?
+        sleep(poll)
+        root.log.snapshot.each do |path, node|
+          next unless node.cancelable && !node.finished?
+          request = CancellationsApp.request_key(key, path)
+          reason = store.read(request) or next
+          store.delete(request)
+          root.request_cancel(path, reason.to_s)
+        end
+      end
+    end
   end
 
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
@@ -656,3 +716,5 @@ class TaskProgress
     false
   end
 end
+
+require_relative "task_progress/railtie" if defined?(::Rails::Railtie)

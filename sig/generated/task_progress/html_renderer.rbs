@@ -1,0 +1,66 @@
+# Generated from lib/task_progress/html_renderer.rb with RBS::Inline
+
+class TaskProgress
+  # Draws a tree as HTML - the same rows, with the same classes, as the browser client's renderers
+  # draw, so `task_tree.css` styles both and a page can move from one to the other unchanged.
+  # This is what TurboStreamOutput sends, and what TurboSSE streams.
+  #
+  # Elapsed times are `<task-progress-clock>` elements (`task_progress_clock.js`), which tick on
+  # between frames; everything else is as it was when the tree was drawn. A cancelable task gets
+  # a cancel button that is a plain form, posting the task's path and `cancel_token` to
+  # `cancel_url` - so it needs no JavaScript, and Turbo submits it without leaving the page.
+  #
+  # To draw rows your own way, subclass it and override `row`, or hand TurboStreamOutput anything
+  # that answers `id` and `render(snapshot, from = [])` - say, an object that renders a partial
+  class HTMLRenderer
+    # A circle with a cross in it, drawn in the row's text color - the same in every font
+    CANCEL_ICON: String
+
+    GLYPHS: Hash[Symbol, String]
+
+    # The id of the element the tree is drawn in - what a Turbo Stream targets
+    attr_reader id: String
+
+    @cancel_url: String?
+
+    @cancel_token: String?
+
+    @clock: ^() -> Float
+
+    # Draws into an element with the id `id`. Without a `cancel_url`, no task offers a cancel
+    # button. `clock` is for tests to pin down
+    # : (id: String, ?cancel_url: String?, ?cancel_token: String?, ?clock: ^() -> Float) -> void
+    def initialize: (id: String, ?cancel_url: String?, ?cancel_token: String?, ?clock: ^() -> Float) -> void
+
+    # The whole tree in its element - or the subtree at `from`, drawn as a tree of its own
+    # : (State, ?path) -> String
+    def render: (State, ?path) -> String
+
+    # One task's row, `depth` levels in
+    # : (State, path, Node, ?depth: Integer) -> String
+    def row: (State, path, Node, ?depth: Integer) -> String
+
+    private
+
+    # : (String?) -> String
+    def h: (String?) -> String
+
+    # : (Node) -> String
+    def message: (Node) -> String
+
+    # The rate over the run so far, and the time left at it
+    # : (Node) -> String?
+    def pace: (Node) -> String?
+
+    # : (path, Node, Integer, bool) -> String
+    def measure: (path, Node, Integer, bool) -> String
+
+    # Ticks on in the browser between frames, from the time the tree was drawn
+    # : (Node) -> String
+    def clock: (Node) -> String
+
+    # The cancel column is there on every row, so the bars line up
+    # : (path, Node) -> String
+    def cancel: (path, Node) -> String
+  end
+end

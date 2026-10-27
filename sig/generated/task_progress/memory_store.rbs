@@ -1,0 +1,28 @@
+# Generated from lib/task_progress/memory_store.rb with RBS::Inline
+
+class TaskProgress
+  # A store kept in this process, for where `Rails.cache` is not to hand - tests, a Rack app that
+  # runs its jobs in-process. Anything with `read`, `write` and `delete` will do as a store; this
+  # is the smallest one, and is safe to share between threads
+  class MemoryStore
+    @entries: Hash[String, untyped]
+
+    @lock: Thread::Mutex
+
+    # An empty store
+    # : () -> void
+    def initialize: () -> void
+
+    # What was written under `key`, or nil
+    # : (String) -> untyped
+    def read: (String) -> untyped
+
+    # Keeps `value` under `key`; options, such as `expires_in:`, are taken and ignored
+    # : (String, untyped, **untyped) -> void
+    def write: (String, untyped, **untyped) -> void
+
+    # Forgets what is under `key`
+    # : (String) -> void
+    def delete: (String) -> void
+  end
+end

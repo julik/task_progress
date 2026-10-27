@@ -54,6 +54,26 @@ end
 
 A block is a task's work: done when it returns, failed with the error when it raises. A parent reads 100% only once it and everything under it are done. On a terminal the tree redraws in place; piped or on CI it writes an execution log instead - one finished line per thing worth saying, never a redraw.
 
+## With Turbo
+
+In a Rails app with turbo-rails, a job draws its tree in every page that shows it - from whichever process it runs in, with no JavaScript of your own:
+
+```ruby
+class ImportJob < ApplicationJob
+  def perform(import)
+    TaskProgress.broadcast(import, "Importing") do |root|
+      root.subtask("Rows", total: rows.size, cancelable: true) { |t| rows.each { import_row(it) && t.tick! } }
+    end
+  end
+end
+```
+
+```erb
+<%= task_progress_tree @import %>
+```
+
+The job draws the whole tree as HTML a few times a second, and Action Cable takes it to every page, where Turbo morphs it in. Cancel buttons are plain forms. Nothing of Rails is needed for the rest of the gem: outside Rails, `broadcast:` says where frames go, and `TurboSSE` streams them to a `<turbo-stream-source>`.
+
 ## In a web app
 
 Stream any task - the whole tree, or one branch of it - as Server-Sent Events:

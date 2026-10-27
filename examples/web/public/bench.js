@@ -4,6 +4,14 @@ import { mountTaskTree } from "/task_progress/react_task_tree.js"
 import { TaskTree } from "/task_progress/task_tree.js"
 import { nextFrame } from "/task_progress/render_queue.js"
 import { LocalTasks } from "/task_progress/local_tasks.js"
+// Imported by name, though only defining the element matters: Assiette's integrity hash skips a
+// bare `import "…"`, which it still fingerprints when serving, and the browser blocks the page
+import { TaskProgressClock } from "/task_progress/task_progress_clock.js" // eslint-disable-line no-unused-vars
+import * as Turbo from "@hotwired/turbo"
+
+// Turbo draws the third pane from HTML the server renders - its streams and its cancel forms,
+// and nothing else on this page
+Turbo.session.drive = false
 
 const application = Application.start()
 application.register("task-tree", TaskTreeController)
@@ -54,6 +62,9 @@ function watch(job) {
   reactProps = { cancelUrl: job.cancellations, cancelToken: job.cancel_token, grafts: [] }
   react.followEventSourceAt(url, reactProps)
   inspector.follow(url)
+  // The Turbo pane has no client of its own: the server draws every frame, and the source
+  // stops itself once the job is through
+  $("turbo-pane").innerHTML = `<turbo-stream-source id="turbo-source" src="/jobs/${job.id}/turbo"></turbo-stream-source><div class="tree" id="turbo-tree"></div>`
 }
 
 let reactProps = {}

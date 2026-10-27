@@ -16,6 +16,7 @@ Everything TaskProgress does, and how. The [README](README.md) is the short vers
 - [Canceling from outside](#canceling-from-outside)
 - [Server-Sent Events](#server-sent-events)
 - [The browser client](#the-browser-client)
+- [Turbo](#turbo)
 - [The wire format](#the-wire-format)
 - [Testing](#testing)
 - [The bench](#the-bench)
@@ -538,6 +539,56 @@ mountTaskTree(element).followEventSourceAt(url, { cancelUrl, cancelToken })  // 
 `task_tree.css` styles the rows both renderers draw: one fixed height, so nothing jumps as glyphs change. The palette sits on `:where(.tree)`, which weighs nothing - any selector of yours overrides it. A cancelable task that has not finished gets a cancel button right of its bar; the column is there on every row, so bars line up. Pressed, the button stays pressed until the cancel comes down the stream - or comes back to life if the server says no.
 
 `requestCancel(url, path, { token })` posts `{path, token}` as JSON, for your own buttons.
+
+## Turbo
+
+A tree can be drawn by Turbo, with no JavaScript of your own: the server draws it as HTML, and Turbo morphs each frame into the page. It is the easiest way to show a job's progress in a Rails app, and it works across processes - the job draws, Action Cable carries the frames to whichever server holds the page.
+
+### In Rails
+
+```ruby
+TaskProgress.broadcast(import, "Importing") { |root| ... }    # in a job, anywhere
+```
+
+```erb
+<%= task_progress_tree @import %>                               <%# in its page %>
+```
+
+Then put `task_tree.css` on the page, and import `task_progress_clock.js` for elapsed times to tick. The Railtie adds `js/` to the asset path, so `stylesheet_link_tag "task_tree"` and an import map `pin "task_progress_clock"` find them.
+
+- **Every frame is the whole tree**, drawn by HTMLRenderer and sent as `<turbo-stream action="replace" method="morph">`, at most every `interval:` seconds (0.25) however spammy the job is. A Turbo Stream has no seq and no gaps to notice; a page that missed a frame, or joined late, is set right by the next one. Morphing changes only what differs, so a bar eases to its new width.
+- **The last frame is kept in `Rails.cache`**, under `task_progress/<dom_id>`, for the helper to draw before the first broadcast arrives.
+- **The stream is `[record, :task_progress]`**, and the tree's element has the id `dom_id(record, :task_progress)`.
+- **Cancel buttons are plain forms.** A cancelable task's button posts its path and a signed token (CancelToken, keyed off the app's `secret_key_base`) to `/task_progress/cancellations`, a route the Railtie adds. The job is in another process, so the route cannot cancel it: it leaves the request in `Rails.cache`, where the job looks for it every `poll:` seconds (1) and decides, as it does for any request. Its next frame shows the cancel. Set `config.task_progress.cancellations_path` to put the route elsewhere, or to nil for none.
+
+`broadcast:`, `store:`, `tokens:`, `cancel_url:` and `renderer:` override what Rails would give. With a block, `broadcast` runs it as the root's work and returns its value; without one it returns the root, finished at exit.
+
+### Without Rails
+
+Nothing of the above needs Rails - only the defaults do:
+
+```ruby
+TaskProgress.broadcast("import-tree", "Importing", broadcast: ->(frame) { hub.publish(frame) }, store: TaskProgress::MemoryStore.new) { ... }
+```
+
+`broadcast:` gets each frame, a `<turbo-stream>` element as a String; `store:` is anything with `read`, `write` and `delete`. `CancellationsApp.new(store:, tokens:)` is the Rack app behind the cancel buttons.
+
+For a tree in the serving process, `TurboSSE` streams it straight to a page, over Server-Sent Events:
+
+```ruby
+[200, TaskProgress::TurboSSE::HEADERS, TaskProgress::TurboSSE.new(task, renderer: TaskProgress::HTMLRenderer.new(id: "tree"), source: "tree-source")]
+```
+
+```html
+<turbo-stream-source id="tree-source" src="/jobs/42/turbo"></turbo-stream-source>
+<div id="tree" class="tree"></div>
+```
+
+When the task finishes it sends the last frame and removes the `<turbo-stream-source>`, so the browser does not reconnect to a finished stream. The bench's third pane is drawn this way.
+
+### Drawing rows your own way
+
+HTMLRenderer draws the rows the browser client draws, with the same classes. Subclass it and override `row(snapshot, path, node, depth:)`, or pass `renderer:` anything that answers `id` and `render(snapshot, from = [])` - an object that renders one of your partials with `ApplicationController.render`, say.
 
 ## The wire format
 

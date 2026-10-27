@@ -89,6 +89,28 @@ class TaskProgress
   # : (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
   def self.iterate: (Enumerable[untyped], ?String, ?total: Integer?, ?step: Integer, **untyped) ?{ (untyped) -> untyped } -> untyped
 
+  # A root whose tree is drawn in pages with Turbo, from wherever it runs - a job, say. Every
+  # frame is the whole tree as HTML (see HTMLRenderer), sent as a Turbo Stream at most every
+  # `interval` seconds, and kept in `store` for a page to draw before the first one arrives.
+  # Cancel buttons post to `cancel_url`; the request waits in `store`, where this checks for it
+  # every `poll` seconds - so it works across processes too. With a block, the block is the
+  # root's work, as with `cli`.
+  #
+  #     TaskProgress.broadcast(import, "Importing") { |root| ... }   # in a Rails job
+  #     <%= task_progress_tree import %>                               # in its page
+  #
+  # In Rails, the target is a record, and the rest comes from RailsDefaults: Turbo::StreamsChannel,
+  # Rails.cache and the route the Railtie adds. Outside Rails the target is the element's id, and
+  # `broadcast:` - called with each frame - is up to you
+  # : (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) -> TaskProgress
+  # : [T] (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) { (TaskProgress) -> T } -> T?
+  def self.broadcast: (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) -> TaskProgress
+                    | [T] (untyped, ?String, ?broadcast: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, ?expires_in: Integer, **untyped) { (TaskProgress) -> T } -> T?
+
+  # Picks up the requests CancellationsApp leaves in the store, until the root has ended
+  # : (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
+  def self.watch_cancellations: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
+
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
   # : (untyped) -> Integer?
   def self.size_of: (untyped) -> Integer?

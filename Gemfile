@@ -23,4 +23,10 @@ end
 group :test do
   # The browser tests drive the bench in a headless Chrome; without one they skip
   gem "ferrum", "~> 0.17"
+  # A small Rails app, booted in a process of its own, for the Railtie, the helper and the Turbo
+  # broadcasts - the gem itself never needs Rails
+  gem "railties", require: false
+  gem "actioncable", require: false
+  gem "activemodel", require: false
+  gem "turbo-rails", require: false
 end

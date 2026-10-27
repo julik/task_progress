@@ -25,11 +25,11 @@ main { padding: 20px 28px; min-width: 0; box-sizing: border-box; width: 100%; ma
 .job > button { flex: none; }
 .job-title { font-size: 18px; font-weight: 600; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job-meta { color: var(--muted); font-size: 13px; line-height: 18px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.panes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .panes h3, .inspector h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 6px; }
 .panes { min-width: 0; }
 .panes > section { min-width: 0; }
-.panes .row { grid-template-columns: minmax(0, 1fr) 90px 20px 90px; }
+.panes .row { grid-template-columns: minmax(0, 1fr) 64px 20px 76px; gap: 10px; }
 .inspector { margin-top: 28px; }
 #stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin: 0 0 12px; }
 #stats div { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
