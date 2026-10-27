@@ -274,6 +274,8 @@ class TaskTest < Minitest::Test
     assert_equal :canceled, root.subtasks.first.status
     assert_raises(Interrupt) { root.subtask("Stopped") { raise Interrupt, "Cancelled from the bench" } }
     assert_equal "Cancelled from the bench", root.subtasks.last.message
+    assert_raises(Interrupt) { root.subtask("Signaled") { raise Interrupt, "" } }
+    assert_nil root.subtasks.last.message, "a SIGINT from outside gives no reason"
   end
 
   def test_cancel_calls_off_the_task_and_everything_open_under_it

@@ -17,6 +17,8 @@ class TaskProgress
     attr_reader :id #: String
     # The seq of the last batch it committed
     attr_reader :seq #: Integer
+    # The stream key the tree is written to or read from, when it is - see TaskProgress.handoff
+    attr_reader :key #: String?
 
     # Lower case only, like the task ids, so neither can clash with another on a filesystem that
     # ignores case (macOS, Windows) should one ever end up in a file name
@@ -29,14 +31,20 @@ class TaskProgress
     # @rbs @state: State
     # @rbs @outputs: Array[output]
     # @rbs @outbox: Array[[Batch, Array[output]]]
-    # @rbs @snapshot: [Integer, State]?
+    # @rbs @snapshot: State?
+    # @rbs @touched: Set[path]
     # @rbs @on_cancel: Hash[path, Array[^(String?) -> void]]
     # @rbs @on_output_error: ^(Exception, untyped) -> void
+    # @rbs @changed: Thread::ConditionVariable
+    # @rbs @closers: Array[^() -> void]
 
     # An empty log. `clock` gives the time to stamp batches with, and `random` draws task ids - both for tests to pin down
-    #: (?id: String | Symbol, ?clock: ^() -> Float, ?random: Random) -> void
-    def initialize(id: SecureRandom.alphanumeric(10, chars: ID_CHARS), clock: -> { Process.clock_gettime(Process::CLOCK_REALTIME) }, random: Random.new)
+    #: (?id: String | Symbol, ?key: String?, ?clock: ^() -> Float, ?random: Random) -> void
+    def initialize(id: SecureRandom.alphanumeric(10, chars: ID_CHARS), key: nil, clock: -> { Process.clock_gettime(Process::CLOCK_REALTIME) }, random: Random.new)
       @id = id.to_s
+      @key = key
+      @changed = ConditionVariable.new
+      @closers = []
       @clock = clock
       @random = random
       @lock = Mutex.new
@@ -46,12 +54,13 @@ class TaskProgress
       @outputs = [] #: Array[output]
       @outbox = []
       @snapshot = nil
+      @touched = Set.new
       @on_cancel = {}
       @on_output_error = ->(error, output) { warn("TaskProgress: #{output.inspect} raised #{error.class}: #{error.message}") }
     end
 
     # Hears about an output that raised, with the error and the output; it warns by default
-    attr_writer :on_output_error #: ^(Exception, untyped) -> void
+    attr_accessor :on_output_error #: ^(Exception, untyped) -> void
 
     # Runs the block under the lock, collecting what it adds with `tx.<<`; it commits as one
     # batch, or not at all if the block raises. A transaction opened inside another one on the
@@ -135,9 +144,12 @@ class TaskProgress
     def snapshot
       return @state if @lock.owned?
       @lock.synchronize do
-        cached = @snapshot
-        cached = @snapshot = [@seq, @state.snapshot] unless cached && cached[0] == @seq
-        cached[1]
+        snapshot = @snapshot
+        if snapshot.nil? || @touched.any?
+          snapshot = @snapshot = @state.snapshot(snapshot, (@touched if snapshot))
+          @touched = Set.new
+        end
+        snapshot
       end
     end
 
@@ -149,6 +161,30 @@ class TaskProgress
         events = @state.squash(path).map { it.with(path: it.path.drop(path.length).freeze) }
         Batch.new(log: path.empty? ? @id : Branch.id(@id, path), prev: 0, seq: @seq, at: @clock.call, events: events.freeze)
       end
+    end
+
+    # Waits up to `timeout` seconds for a batch after `seq` to commit, and returns the seq then
+    #: (Integer, Integer | Float) -> Integer
+    def wait_for_change(seq, timeout)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      @lock.synchronize do
+        while @seq == seq && (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive?
+          @changed.wait(@lock, left)
+        end
+        @seq
+      end
+    end
+
+    # Runs the block when the log is closed - to stop a thread that feeds it, or flush an output
+    #: () { () -> void } -> void
+    def on_close(&block) = @lock.synchronize { @closers << block }
+
+    # Stops what was started for the tree - following a stream, beating, buffering - for when
+    # nobody needs it any more. The tree itself stays as it is
+    #: () -> void
+    def close
+      closers = @lock.synchronize { @closers.slice!(0..) || [] }
+      closers.each(&:call)
     end
 
     # Its id and seq
@@ -184,10 +220,13 @@ class TaskProgress
 
     #: (Transaction) -> void
     def commit_locked(tx)
+      # A transaction that changed a node without an event - sealing a mount - still changes what a snapshot shows
+      @touched.merge(tx.journal.paths)
       return if tx.events.empty?
       batch = Batch.new(log: @id, prev: @seq, seq: @seq + 1, at: tx.at, events: tx.events.freeze)
       @seq = batch.seq
       @outbox << [batch, @outputs]
+      @changed.broadcast
     end
 
     # One deliverer at a time, taking the outbox in order. A commit made from inside an output

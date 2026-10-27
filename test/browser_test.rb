@@ -132,7 +132,7 @@ class BrowserTest < Minitest::Test
     reconnects = page.evaluate(%(document.getElementById("stats").innerText))[/reconnects\s+(\d+)/, 1]
     assert_operator reconnects.to_i, :>, 0, "the stream was cut, and picked up again"
     assert_equal rows("#stimulus-tree"), rows("#react-tree")
-    assert_equal job.root.log.snapshot.size, rows("#react-tree").length
+    assert_equal job.root.log.snapshot.rows.count, rows("#react-tree").length, "every row, with the finished workers folded"
     assert_empty @errors
   end
 

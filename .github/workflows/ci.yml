@@ -11,6 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     # A wedged Ractor or a stream that never ends should fail the run, not hold it for hours
     timeout-minutes: 10
+    # The Redis stream is tested against a real Redis
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 15
     strategy:
       fail-fast: false
       matrix:

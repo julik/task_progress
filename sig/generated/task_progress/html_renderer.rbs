@@ -21,11 +21,11 @@ class TaskProgress
     # The id of the element the tree is drawn in - what a Turbo Stream targets
     attr_reader id: String
 
-    @cancel_url: String?
+    @clock: ^() -> Float
 
     @cancel_token: String?
 
-    @clock: ^() -> Float
+    @cancel_url: String?
 
     # Draws into an element with the id `id`. Without a `cancel_url`, no task offers a cancel
     # button. `clock` is for tests to pin down
@@ -39,6 +39,11 @@ class TaskProgress
     # One task's row, `depth` levels in
     # : (State, path, Node, ?depth: Integer) -> String
     def row: (State, path, Node, ?depth: Integer) -> String
+
+    # Siblings folded into one row, see State#rows - drawn as a row like any other, so the
+    # columns line up
+    # : (path, Fold, ?depth: Integer) -> String
+    def fold: (path, Fold, ?depth: Integer) -> String
 
     private
 

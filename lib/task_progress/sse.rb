@@ -14,8 +14,8 @@ class TaskProgress
   #     headers.merge!(TaskProgress::SSE::HEADERS)
   #     self.response_body = TaskProgress::SSE.new(task)
   #
-  # The tree must live in the serving process. For one that lives in a job elsewhere, have the
-  # job publish to a stream (PublishingOutput) and serve that
+  # The tree must live in the serving process. For one that lives in a job elsewhere - handed
+  # off with TaskProgress.handoff - stream `TaskProgress.follow(key)` with `close: true`
   class SSE
     # What an SSE response is sent with
     HEADERS = {"content-type" => "text/event-stream", "cache-control" => "no-cache", "x-accel-buffering" => "no"}.freeze #: Hash[String, String]
@@ -23,6 +23,7 @@ class TaskProgress
     # @rbs @source: TaskProgress | Log
     # @rbs @heartbeat: Integer | Float
     # @rbs @retry_ms: Integer
+    # @rbs @close: bool
 
     # A whole Rack response: status, headers and this body
     #: (TaskProgress | Log, **untyped) -> [Integer, Hash[String, String], SSE]
@@ -32,12 +33,17 @@ class TaskProgress
     #: (Batch) -> String
     def self.frame(batch) = "id: #{batch.seq}\nevent: batch\ndata: #{Wire.dump(batch)}\n\n"
 
-    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of quiet, and telling the browser to reconnect after `retry_ms`
-    #: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer) -> void
-    def initialize(task_or_log, heartbeat: 15, retry_ms: 2000)
+    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of
+    # quiet, and telling the browser to reconnect after `retry_ms`. With `close: true` it closes
+    # the task's log once the stream ends - for a tree followed only for this stream:
+    #
+    #     TaskProgress::SSE.response(TaskProgress.follow(key), close: true)
+    #: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer, ?close: bool) -> void
+    def initialize(task_or_log, heartbeat: 15, retry_ms: 2000, close: false)
       @source = task_or_log
       @heartbeat = heartbeat
       @retry_ms = retry_ms
+      @close = close
     end
 
     # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
@@ -54,6 +60,8 @@ class TaskProgress
       end
     ensure
       @source.remove_output(output) if output
+      source = @source
+      (source.is_a?(Log) ? source : source.log).close if @close
     end
 
     private

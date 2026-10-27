@@ -16,6 +16,8 @@ class TaskProgress
   # per `interval`, the newest. With nothing to say for `heartbeat` it says it is still
   # going, so a CI runner watching for output does not take a long quiet step for a hang
   class ExecutionLogOutput
+    @ended: Set[path]
+
     @thread: Thread?
 
     @closed: bool
@@ -65,6 +67,13 @@ class TaskProgress
     def say: (State, String) -> void
 
     ENDINGS: Array[Symbol]
+
+    PUT_ENDINGS: Hash[Symbol, Symbol]
+
+    # A squashed batch - from BufferedOutput, a stream, a mount catching up - says a task ended by
+    # putting it whole, finished. Said once, like the ending it stands for
+    # : (Event) -> Event?
+    def ending_put: (Event) -> Event?
 
     # : (State, Event) -> String
     def ending: (State, Event) -> String

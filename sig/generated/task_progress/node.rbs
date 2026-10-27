@@ -21,6 +21,8 @@ class TaskProgress
 
     attr_accessor cancelable(): bool?
 
+    attr_accessor attempt(): Integer?
+
     attr_accessor message(): String?
 
     attr_accessor status(): Symbol
@@ -41,8 +43,8 @@ class TaskProgress
 
     attr_accessor autofinish(): bool?
 
-    def self.new: (?String name, ?Integer? total, ?Integer count, ?Integer | Float percent, ?Float weight, ?Integer? expect, ?bool? indeterminate, ?String? unit, ?bool? cancelable, ?String? message, ?Symbol status, ?Hash[Symbol, untyped]? error, ?bool? stale, ?Float opened_at, ?Float? started_at, ?Float? finished_at, ?Array[String] children, ?Mount? sealed, ?bool? autofinish) -> instance
-                | (?name: String, ?total: Integer?, ?count: Integer, ?percent: Integer | Float, ?weight: Float, ?expect: Integer?, ?indeterminate: bool?, ?unit: String?, ?cancelable: bool?, ?message: String?, ?status: Symbol, ?error: Hash[Symbol, untyped]?, ?stale: bool?, ?opened_at: Float, ?started_at: Float?, ?finished_at: Float?, ?children: Array[String], ?sealed: Mount?, ?autofinish: bool?) -> instance
+    def self.new: (?String name, ?Integer? total, ?Integer count, ?Integer | Float percent, ?Float weight, ?Integer? expect, ?bool? indeterminate, ?String? unit, ?bool? cancelable, ?Integer? attempt, ?String? message, ?Symbol status, ?Hash[Symbol, untyped]? error, ?bool? stale, ?Float opened_at, ?Float? started_at, ?Float? finished_at, ?Array[String] children, ?Mount? sealed, ?bool? autofinish) -> instance
+                | (?name: String, ?total: Integer?, ?count: Integer, ?percent: Integer | Float, ?weight: Float, ?expect: Integer?, ?indeterminate: bool?, ?unit: String?, ?cancelable: bool?, ?attempt: Integer?, ?message: String?, ?status: Symbol, ?error: Hash[Symbol, untyped]?, ?stale: bool?, ?opened_at: Float, ?started_at: Float?, ?finished_at: Float?, ?children: Array[String], ?sealed: Mount?, ?autofinish: bool?) -> instance
   end
 
   # One task, as the tree holds it: State::FIELDS, and then what never goes over the wire -

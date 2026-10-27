@@ -16,36 +16,45 @@ class TaskProgress
     # The seq of the last batch it committed
     attr_reader seq: Integer
 
+    # The stream key the tree is written to or read from, when it is - see TaskProgress.handoff
+    attr_reader key: String?
+
     # Lower case only, like the task ids, so neither can clash with another on a filesystem that
     # ignores case (macOS, Windows) should one ever end up in a file name
     ID_CHARS: Array[String]
 
-    @on_output_error: ^(Exception, untyped) -> void
-
-    @on_cancel: Hash[path, Array[^(String?) -> void]]
-
-    @snapshot: [ Integer, State ]?
-
-    @outbox: Array[[ Batch, Array[output] ]]
-
-    @outputs: Array[output]
-
-    @state: State
-
-    @delivery: Thread::Mutex
-
-    @lock: Thread::Mutex
+    @clock: ^() -> Float
 
     @random: Random
 
-    @clock: ^() -> Float
+    @lock: Thread::Mutex
+
+    @delivery: Thread::Mutex
+
+    @state: State
+
+    @outputs: Array[output]
+
+    @outbox: Array[[ Batch, Array[output] ]]
+
+    @snapshot: State?
+
+    @touched: Set[path]
+
+    @on_cancel: Hash[path, Array[^(String?) -> void]]
+
+    @on_output_error: ^(Exception, untyped) -> void
+
+    @changed: Thread::ConditionVariable
+
+    @closers: Array[^() -> void]
 
     # An empty log. `clock` gives the time to stamp batches with, and `random` draws task ids - both for tests to pin down
-    # : (?id: String | Symbol, ?clock: ^() -> Float, ?random: Random) -> void
-    def initialize: (?id: String | Symbol, ?clock: ^() -> Float, ?random: Random) -> void
+    # : (?id: String | Symbol, ?key: String?, ?clock: ^() -> Float, ?random: Random) -> void
+    def initialize: (?id: String | Symbol, ?key: String?, ?clock: ^() -> Float, ?random: Random) -> void
 
     # Hears about an output that raised, with the error and the output; it warns by default
-    attr_writer on_output_error: ^(Exception, untyped) -> void
+    attr_accessor on_output_error: ^(Exception, untyped) -> void
 
     # Runs the block under the lock, collecting what it adds with `tx.<<`; it commits as one
     # batch, or not at all if the block raises. A transaction opened inside another one on the
@@ -84,6 +93,19 @@ class TaskProgress
     # subtree there, rooted at `[]` the way a Branch would send it
     # : (?path) -> Batch
     def squashed: (?path) -> Batch
+
+    # Waits up to `timeout` seconds for a batch after `seq` to commit, and returns the seq then
+    # : (Integer, Integer | Float) -> Integer
+    def wait_for_change: (Integer, Integer | Float) -> Integer
+
+    # Runs the block when the log is closed - to stop a thread that feeds it, or flush an output
+    # : () { () -> void } -> void
+    def on_close: () { () -> void } -> void
+
+    # Stops what was started for the tree - following a stream, beating, buffering - for when
+    # nobody needs it any more. The tree itself stays as it is
+    # : () -> void
+    def close: () -> void
 
     # Its id and seq
     # : () -> String

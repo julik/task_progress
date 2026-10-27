@@ -6,13 +6,16 @@ require "json"
 class TaskProgress
   # A batch as JSON, one object per line:
   #
-  #     {"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0","00af"],"set",40],[["x3k0"],"note","Reading"]]}
+  #     {"v":1,"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0","00af"],"set",40],[["x3k0"],"note","Reading"]]}
   #
   # The reading side is meant for a writer we do not trust - a subprocess parsing hostile input,
   # a stream relayed from elsewhere - so nothing it sends is taken at its word: a batch with
   # anything wrong in it is dropped whole, numbers are clamped, strings scrubbed and cut, paths
   # bounded, and nothing in an error is ever turned into a class
   module Wire
+    # The version of the format every batch carries as `v`. A reader takes only its own: a batch
+    # from a newer writer is dropped, as a garbled one would be, rather than half understood
+    VERSION = 1 #: Integer
     # The longest line a reader takes - see the MANUAL for what every limit is for
     LINE_LIMIT = 4 * 1024 * 1024 #: Integer
     # Where a string is cut
@@ -37,7 +40,7 @@ class TaskProgress
       # The batch as a JSON-ready Hash
       #: (Batch) -> Hash[Symbol, untyped]
       def to_h(batch)
-        {log: batch.log, prev: batch.prev, seq: batch.seq, at: batch.at,
+        {v: VERSION, log: batch.log, prev: batch.prev, seq: batch.seq, at: batch.at,
          ops: batch.events.map { |e| e.value.nil? ? [e.path, e.op] : [e.path, e.op, e.value] }}
       end
 
@@ -58,6 +61,7 @@ class TaskProgress
       def from_h(data)
         return unless data.is_a?(Hash)
         data = data.transform_keys(&:to_s)
+        return unless data["v"] == VERSION
         prev, seq, ops = data.values_at("prev", "seq", "ops")
         return unless prev.is_a?(Integer) && seq.is_a?(Integer) && prev >= 0 && seq > prev
         return unless ops.is_a?(Array) && ops.length <= MAX_OPS
@@ -148,6 +152,7 @@ class TaskProgress
         attrs[:expect] = count(value["expect"]) if value.key?("expect")
         attrs[:indeterminate] = value["indeterminate"] == true if value.key?("indeterminate")
         attrs[:cancelable] = value["cancelable"] == true if value.key?("cancelable")
+        attrs[:attempt] = count(value["attempt"])&.clamp(1, 1_000_000) if value.key?("attempt")
         attrs[:unit] = text(value["unit"])&.slice(0, 16) if value.key?("unit")
         attrs[:stale] = value["stale"] == true if stale && value.key?("stale")
         attrs

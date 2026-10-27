@@ -7,7 +7,7 @@ class WireTest < Minitest::Test
     [].tap { |all| TaskProgress::Wire.each_batch(StringIO.new(+text), **) { all << it } }
   end
 
-  def line(ops, prev: 0, seq: 1) = JSON.generate(log: "x", prev:, seq:, at: 1.5, ops:)
+  def line(ops, prev: 0, seq: 1) = JSON.generate(v: 1, log: "x", prev:, seq:, at: 1.5, ops:)
 
   def test_a_batch_dumps_to_one_line_and_parses_back
     batch = TaskProgress::Batch.new(log: "abc", prev: 4, seq: 5, at: 1.25, events: [
@@ -16,7 +16,7 @@ class WireTest < Minitest::Test
     ])
     json = TaskProgress::Wire.dump(batch)
     refute_includes json, "\n"
-    assert_equal '{"log":"abc","prev":4,"seq":5,"at":1.25,"ops":[[["x3k0","00af"],"set",40],[[],"done"]]}', json
+    assert_equal '{"v":1,"log":"abc","prev":4,"seq":5,"at":1.25,"ops":[[["x3k0","00af"],"set",40],[[],"done"]]}', json
     assert_equal batch, TaskProgress::Wire.parse(json)
   end
 
@@ -44,6 +44,12 @@ class WireTest < Minitest::Test
     assert_nil TaskProgress::Wire.parse(line([], prev: -1, seq: 3))
     assert_nil TaskProgress::Wire.parse(JSON.generate(prev: 0, seq: 1, ops: "nope"))
     assert TaskProgress::Wire.parse(line([], prev: 0, seq: 9)), "a squash or a merge spans many seqs"
+  end
+
+  def test_only_its_own_version_of_the_format_is_read
+    assert TaskProgress::Wire.parse(line([]))
+    assert_nil TaskProgress::Wire.parse(JSON.generate(log: "x", prev: 0, seq: 1, ops: [])), "no version, no batch"
+    assert_nil TaskProgress::Wire.parse(JSON.generate(v: 2, log: "x", prev: 0, seq: 1, ops: [])), "a newer writer is not half understood"
   end
 
   def test_numbers_are_clamped_and_strings_scrubbed_and_cut

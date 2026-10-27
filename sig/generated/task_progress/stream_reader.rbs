@@ -1,0 +1,46 @@
+# Generated from lib/task_progress/stream_reader.rb with RBS::Inline
+
+class TaskProgress
+  # Reads a tree a StreamOutput writes: the snapshot first, as one batch with `prev` 0, then
+  # every batch after it as it comes. Each read picks up where the last one left off.
+  #
+  # It hands on what it reads, and judges none of it - Mount does that, see Mount#follow_stream.
+  # After a gap, `resync!` makes the next read start over from the latest snapshot
+  class StreamReader
+    # The key it reads
+    attr_reader key: String
+
+    @stream: untyped
+
+    @after: String?
+
+    @started: bool
+
+    # Reads `stream` at `key`
+    # : (untyped, String) -> void
+    def initialize: (untyped, String) -> void
+
+    # The batches since the last read - starting from the snapshot. With a `timeout`, waits up
+    # to that many seconds for one when there are none yet
+    # : (?timeout: (Integer | Float)?) -> Array[Batch]
+    def read: (?timeout: (Integer | Float)?) -> Array[Batch]
+
+    # The next read starts over, from the latest snapshot
+    # : () -> void
+    def resync!: () -> void
+
+    # The tree as of the latest snapshot, as one batch - or nil when nothing was ever written
+    # here, or it has expired
+    # : () -> Batch?
+    def snapshot: () -> Batch?
+
+    # Whether the writer said lately that it is alive
+    # : () -> bool
+    def alive?: () -> bool
+
+    private
+
+    # : () -> [String, Batch]?
+    def snapshot_entry: () -> [ String, Batch ]?
+  end
+end

@@ -95,7 +95,7 @@ class ConvenienceTest < Minitest::Test
     assert_equal [rows.path, :say, "Skipped row 12"], [said.path, said.op, said.value]
     refute(root.log.squashed.events.any? { it.op == :say })
     assert_equal TaskProgress::Wire.parse(TaskProgress::Wire.dump(batches.last)), batches.last
-    assert_nil TaskProgress::Wire.parse(JSON.generate(log: "x", prev: 0, seq: 1, ops: [[[], "say", 12]]))
+    assert_nil TaskProgress::Wire.parse(JSON.generate(v: 1, log: "x", prev: 0, seq: 1, ops: [[[], "say", 12]]))
   end
 
   def test_a_mount_and_a_buffer_pass_what_was_said

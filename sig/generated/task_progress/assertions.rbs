@@ -1,0 +1,36 @@
+# Generated from lib/task_progress/assertions.rb with RBS::Inline
+
+class TaskProgress
+  # Assertions for Minitest - and ActiveSupport::TestCase, which is Minitest underneath - about
+  # what work reported. Each failure shows the whole tree, see TaskProgress#outline.
+  #
+  #     class ImportTest < Minitest::Test
+  #       include TaskProgress::Assertions
+  #
+  #       def test_import
+  #         import = TaskProgress.new("Import")
+  #         Importer.new(progress: import).run
+  #         assert_task_done import
+  #         assert_task_failed import.subtasks.first, with: /row 12/
+  #       end
+  #     end
+  module Assertions
+    def assert: (untyped, ?String) -> void
+
+    # The task is done, and everything under it ended
+    # : (TaskProgress, ?String?) -> void
+    def assert_task_done: (TaskProgress, ?String?) -> void
+
+    # The task failed - with an error whose message matches `with`, if given
+    # : (TaskProgress, ?with: (String | Regexp)?, ?message: String?) -> void
+    def assert_task_failed: (TaskProgress, ?with: (String | Regexp)?, ?message: String?) -> void
+
+    # The task was canceled
+    # : (TaskProgress, ?String?) -> void
+    def assert_task_canceled: (TaskProgress, ?String?) -> void
+
+    # The tree, as a failure message ends with it
+    # : (TaskProgress) -> String
+    def self.tree: (TaskProgress) -> String
+  end
+end

@@ -1,0 +1,41 @@
+# Generated from lib/task_progress/recording_output.rb with RBS::Inline
+
+class TaskProgress
+  # Keeps every batch it gets, for a test to look through:
+  #
+  #     recording = TaskProgress::RecordingOutput.new
+  #     Importer.new(progress: TaskProgress.new("Import", outputs: [recording])).run
+  #     assert_includes recording.said, "Skipped 3 rows"
+  #     assert_equal 1, recording.events(:fail).length
+  #
+  # Safe to share between threads
+  class RecordingOutput
+    @batches: Array[Batch]
+
+    @lock: Thread::Mutex
+
+    # Nothing recorded yet
+    # : () -> void
+    def initialize: () -> void
+
+    # Records the batch
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+
+    # Every batch so far, in order
+    # : () -> Array[Batch]
+    def batches: () -> Array[Batch]
+
+    # Every event so far, in order - only those with the op `op`, if given
+    # : (?Symbol?) -> Array[Event]
+    def events: (?Symbol?) -> Array[Event]
+
+    # What the tree was told to `puts`, in order
+    # : () -> Array[String]
+    def said: () -> Array[String]
+
+    # The tree the batches make, as an outline - see TaskProgress#outline
+    # : () -> Hash[Symbol, untyped]?
+    def outline: () -> Hash[Symbol, untyped]?
+  end
+end

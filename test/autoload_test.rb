@@ -57,7 +57,8 @@ class AutoloadTest < Minitest::Test
           TaskProgress.const_get(name)
           exit!(0)
         rescue LoadError => e
-          exit!(name == :TrackedIO && e.message.include?("progressive_io") ? 0 : 1)
+          # Without gems there is no progressive_io and no ActiveJob - the two parts that need one
+          exit!({TrackedIO: "progressive_io", JobSerializer: "active_support"}[name].then { it && e.message.include?(it) } ? 0 : 1)
         rescue Exception => e
           warn "\#{name}: \#{e.class}: \#{e.message}"
           exit!(1)
@@ -81,6 +82,6 @@ class AutoloadTest < Minitest::Test
       p TaskProgress.constants.select { TaskProgress.autoload?(it) }
       p [defined?(JSON), defined?(OpenSSL)]
     RUBY
-    assert_equal %([:TrackedIO]\n["constant", "constant"]\n), out, "TrackedIO stays unloaded without progressive_io"
+    assert_equal %([:TrackedIO, :JobSerializer]\n["constant", "constant"]\n), out, "TrackedIO and JobSerializer stay unloaded without their gems"
   end
 end

@@ -28,9 +28,12 @@ class TaskProgress
   RACTORS: bool
 
   # Loads every part now rather than on first use - before forking workers, say, so they share
-  # the loaded code. TrackedIO is left out when the progressive_io gem is not there
+  # the loaded code. TrackedIO is left out when the progressive_io gem is not there, and
+  # JobSerializer when ActiveJob is not
   # : () -> singleton(TaskProgress)
   def self.eager_load!: () -> singleton(TaskProgress)
+
+  OPTIONAL: Array[Symbol]
 
   # Raised at whoever works on a task that was called off, so the work stops at its next step.
   # An Exception rather than a StandardError, like Interrupt: a `rescue => e` around one step
@@ -111,6 +114,70 @@ class TaskProgress
   # : (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
   def self.watch_cancellations: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
 
+  # Where `handoff`, `adopt` and `follow` keep trees, unless told otherwise: a MemoryStream for
+  # this process alone, until it is set to something every process can reach
+  #
+  #     TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+  # : () -> untyped
+  def self.stream: () -> untyped
+
+  # Sets where trees are kept, see `stream`
+  # : (untyped) -> void
+  def self.stream=: (untyped) -> void
+
+  # A root to hand to whoever does the work - a job, a worker, another machine - which takes it
+  # up with `adopt`. Until then it waits, as "pending", where anyone can `follow` it: a page can
+  # show the job queued before any worker has picked it up.
+  #
+  #     import = TaskProgress.handoff("Importing", cancelable: true)
+  #     ImportJob.perform_later(upload, import)        # ActiveJob takes the task itself
+  #     Importer.perform_async(upload.id, import.key)  # anything else, its key
+  #
+  # The tree lives in `stream` under `key`. Once it is handed off, leave it to the worker: what
+  # this side writes after the worker has started is ignored
+  # : (String, ?stream: untyped, **untyped) -> TaskProgress
+  def self.handoff: (String, ?stream: untyped, **untyped) -> TaskProgress
+
+  # Takes up a tree handed off with `handoff` - by its key, or the task itself - as a root of
+  # its own, with the name and attributes it was handed off with. It starts the tree over: a
+  # second worker to adopt it, a job retried, replaces what the last one wrote.
+  #
+  # Batches go out squashed, every `interval` seconds at most. Every `beat` seconds it tells
+  # whoever follows that it is alive, and takes the cancel requests that came. With a block,
+  # the block is the root's work, see `run`, and it all stops when the block returns. Without
+  # one, call `log.close` once the work is over - ActiveJob does this by itself, see JobSerializer
+  # : (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+  # : [T] (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  def self.adopt: (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+                | [T] (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+
+  # A tree that mirrors the one in `stream` at `key`, kept up to date on a thread of its own -
+  # for drawing it anywhere: a terminal, an SSE or polling endpoint, a parent's tree. Requests
+  # to cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and
+  # fails after `give_up_after` seconds of that, see Mount#follow_stream. Call `log.close` to stop
+  # following - SSE and Poll can do it for you when they are done
+  # : (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+  def self.follow: (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+
+  # The tree in `stream` at `key` as it is now, read once - for a page, or one poll, that needs
+  # no more than that. See `follow` for one kept up to date
+  # : (String, ?stream: untyped) -> TaskProgress
+  def self.fetch: (String, ?stream: untyped) -> TaskProgress
+
+  # Runs the block as the work of every root among `arguments` that a worker took up with `adopt`
+  # - done when it returns, failed when it raises - and closes them after. What JobSerializer
+  # wraps every ActiveJob in; for any other job runner, wrap `perform` in it the same way
+  # : [T] (Array[untyped]) { () -> T } -> T?
+  def self.working_on: [T] (Array[untyped]) { () -> T } -> T?
+
+  # The block as the work of each root in turn, the first outermost
+  # : [T] (Array[TaskProgress]) { () -> T } -> T?
+  def self.within: [T] (Array[TaskProgress]) { () -> T } -> T?
+
+  # A root that is a mount and nothing else, named after `key` until the stream says otherwise
+  # : (String) -> [TaskProgress, Mount]
+  def self.mirror: (String) -> [ TaskProgress, Mount ]
+
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
   # : (untyped) -> Integer?
   def self.size_of: (untyped) -> Integer?
@@ -126,17 +193,35 @@ class TaskProgress
   def self.null: (?String) -> TaskProgress
 
   # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
-  # and `message:` as the tree changes. See `subtask` for `autofinish`
-  # : (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) ?{ (percent: Integer, message: String?) -> void } -> void
-  def initialize: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) ?{ (percent: Integer, message: String?) -> void } -> void
+  # and `message:` as the tree changes. See `subtask` for `autofinish`. `attempt` says which
+  # run of the work this is - from 2 on, it is drawn with the task; `adopt` counts them
+  # : (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool, ?attempt: Integer?) ?{ (percent: Integer, message: String?) -> void } -> void
+  def initialize: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool, ?attempt: Integer?) ?{ (percent: Integer, message: String?) -> void } -> void
 
   # The attributes an `open` carries, without what is at its default
-  # : (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool) -> Hash[Symbol, untyped]
-  def self.attributes: (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool) -> Hash[Symbol, untyped]
+  # : (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?attempt: Integer?) -> Hash[Symbol, untyped]
+  def self.attributes: (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?attempt: Integer?) -> Hash[Symbol, untyped]
 
   # A handle on the task at `path` in `log`, without opening anything
   # : (Log, path) -> TaskProgress
   def self.handle: (Log, path) -> TaskProgress
+
+  # The stream key a root from `handoff`, `adopt`, `follow` or `fetch` lives under, which is
+  # all it takes to `adopt` or `follow` it from anywhere. Nil for any other task
+  # : () -> String?
+  def key: () -> String?
+
+  # The task and everything under it as plain Hashes - its name, status and percent, and its
+  # count, total, message and error where it has them - for a test to compare, or a log line:
+  #
+  #     {name: "Import", status: :done, percent: 100, children: [
+  #       {name: "Rows", status: :failed, percent: 40, count: 4, total: 10, error: "RuntimeError: row 5"}]}
+  # : () -> Hash[Symbol, untyped]
+  def outline: () -> Hash[Symbol, untyped]
+
+  # The node at `path` in `state` as an outline, see TaskProgress#outline
+  # : (State, path) -> Hash[Symbol, untyped]
+  def self.outline: (State, path) -> Hash[Symbol, untyped]
 
   # The task as the tree holds it now - frozen, and safe to read from any thread
   # : () -> Node
@@ -329,6 +414,16 @@ class TaskProgress
   # mount was ended there, so the root is canceled whether it is cancelable or not
   # : (IO) -> Thread
   def accept_cancel_requests: (IO) -> Thread
+
+  # Takes one cancel request - a line as `accept_cancel_requests` reads them - and returns what
+  # came of it, see `request_cancel`; nil for a line that is not a request
+  # : (String) -> Symbol?
+  def take_cancel_request: (String) -> Symbol?
+
+  # The reason an Interrupt gives, if it gives one: Ctrl-C raises it saying "Interrupt", and a
+  # SIGINT from outside saying nothing at all
+  # : (Interrupt) -> String?
+  def self.interrupted_by: (Interrupt) -> String?
 
   # Every task called off carries the reason, so each of them can say why it stopped
   # : (Transaction, path, String?) -> void

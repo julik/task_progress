@@ -9,10 +9,19 @@ Gem::Specification.new do |s|
   s.email = ["me@julik.nl"]
   s.summary = "Hierarchical progress tracking for task trees, in-process and across process boundaries"
   s.license = "MIT"
+  s.homepage = "https://github.com/julik/task_progress"
+  s.metadata = {
+    "source_code_uri" => "https://github.com/julik/task_progress",
+    "changelog_uri" => "https://github.com/julik/task_progress/blob/main/CHANGELOG.md",
+    "documentation_uri" => "https://github.com/julik/task_progress/blob/main/MANUAL.md",
+    "rubygems_mfa_required" => "true"
+  }
   s.required_ruby_version = ">= 3.4"
 
-  s.files = Dir["lib/**/*.rb", "sig/generated/**/*.rbs", "js/*.{js,css}", "README.md", "MANUAL.md", "LICENSE*"]
+  s.files = Dir["lib/**/*.rb", "sig/generated/**/*.rbs", "js/*.{js,css}", "exe/*", "README.md", "MANUAL.md", "RECIPES.md", "CHANGELOG.md", "LICENSE*"]
   s.require_paths = ["lib"]
+  s.bindir = "exe"
+  s.executables = ["task_progress"]
 
   s.add_development_dependency "minitest", "~> 5.25"
   s.add_development_dependency "rake"

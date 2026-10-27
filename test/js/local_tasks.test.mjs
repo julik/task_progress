@@ -4,7 +4,7 @@ import { TaskTree } from "../../js/task_tree.js"
 import { LocalTasks, trackUpload } from "../../js/local_tasks.js"
 import { rowView } from "../../js/row_view.js"
 
-const server = (seq, ops, prev = seq - 1) => ({ log: "srv", prev, seq, at: seq, ops })
+const server = (seq, ops, prev = seq - 1) => ({ v: 1, log: "srv", prev, seq, at: seq, ops })
 const serverTree = () => {
   const tree = new TaskTree()
   tree.apply(server(1, [[[], "open", { name: "Job" }], [["up00"], "open", { name: "Upload" }], [["pub0"], "open", { name: "Publish" }]], 0))

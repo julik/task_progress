@@ -1,0 +1,69 @@
+# Generated from lib/task_progress/memory_stream.rb with RBS::Inline
+
+class TaskProgress
+  # A stream kept in this process: what TaskProgress.stream is until told otherwise, and what
+  # the tests and the bench run on. It does what RedisStream does - append-only entries under a
+  # key, read from an id on and waited for, trimmed from the front, plus plain values that
+  # expire - so a tree handed off here behaves as one handed off through Redis, as long as the
+  # job runs in the same process.
+  #
+  # Ids are "n-0", like Redis's, and grow across all keys. Safe to share between threads
+  class MemoryStream
+    @appended: Thread::ConditionVariable
+
+    @lock: Thread::Mutex
+
+    @counter: Integer
+
+    @expiries: Hash[String, Float]
+
+    @values: Hash[String, String]
+
+    @entries: Hash[String, Array[[ Integer, String ]]]
+
+    # An empty stream
+    # : () -> void
+    def initialize: () -> void
+
+    # Adds `data` at the end of the stream at `key`, and returns its id
+    # : (String, String) -> String
+    def append: (String, String) -> String
+
+    # The entries after the id `after` - all of them when it is nil - as `[id, data]` pairs. With
+    # a `timeout`, waits up to that many seconds for one to come when there are none yet
+    # : (String, ?after: String?, ?timeout: (Integer | Float)?) -> Array[[String, String]]
+    def read: (String, ?after: String?, ?timeout: (Integer | Float)?) -> Array[[ String, String ]]
+
+    # The value at `key`, or nil
+    # : (String) -> String?
+    def get: (String) -> String?
+
+    # Keeps `value` at `key`, for `expires_in` seconds if given
+    # : (String, String, ?expires_in: (Integer | Float)?) -> void
+    def set: (String, String, ?expires_in: (Integer | Float)?) -> void
+
+    # Forgets the streams and values at these keys
+    # : (*String) -> void
+    def delete: (*String) -> void
+
+    # Drops the entries before the id `before`
+    # : (String, before: String) -> void
+    def trim: (String, before: String) -> void
+
+    # Forgets what is at `key` - a stream or a value - `seconds` from now
+    # : (String, Integer | Float) -> void
+    def expire: (String, Integer | Float) -> void
+
+    private
+
+    # : () -> Float
+    def now: () -> Float
+
+    # Always nil, so a reader can `||` past it
+    # : (String) -> nil
+    def expire_locked: (String) -> nil
+
+    # : (String) -> void
+    def forget: (String) -> void
+  end
+end

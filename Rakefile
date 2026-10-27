@@ -22,7 +22,7 @@ end
 desc "Build the API docs into doc/ - Markdown, with the types as signatures"
 task :doc do
   rm_rf "doc"
-  sh "bundle exec rdoc --output doc lib README.md MANUAL.md"
+  sh "bundle exec rdoc --output doc lib README.md MANUAL.md RECIPES.md"
   cp_r "docs", "doc/docs" # the screenshots the README shows
 end
 

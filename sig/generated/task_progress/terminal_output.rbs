@@ -78,11 +78,11 @@ class TaskProgress
     def hidden?: (State, path) -> bool
 
     # What fits in `room` lines - the last of them saying how many more there are
-    # : (Array[[path?, Node | Integer]], Integer) -> Array[[path?, Node | Integer]]
-    def trim: (Array[[ path?, Node | Integer ]], Integer) -> Array[[ path?, Node | Integer ]]
+    # : (Array[[path?, Node | Fold | Integer]], Integer) -> Array[[path?, Node | Fold | Integer]]
+    def trim: (Array[[ path?, Node | Fold | Integer ]], Integer) -> Array[[ path?, Node | Fold | Integer ]]
 
-    # : (State, path?, Node | Integer, Integer) -> String
-    def line: (State, path?, Node | Integer, Integer) -> String
+    # : (State, path?, Node | Fold | Integer, Integer) -> String
+    def line: (State, path?, Node | Fold | Integer, Integer) -> String
 
     # : (Node) -> String
     def icon: (Node) -> String

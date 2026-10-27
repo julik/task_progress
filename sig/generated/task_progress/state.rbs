@@ -10,6 +10,12 @@ class TaskProgress
 
     CHILD_IDS: Integer
 
+    # Siblings past this many are folded by `rows`...
+    FOLD_OVER: Integer
+
+    # ...keeping this many of the done ones, the latest to finish, and of the ones waiting, the first
+    FOLD_KEEP: Integer
+
     ENDINGS: Hash[Symbol, Symbol]
 
     # What a `put` carries - a Node, less what never goes over the wire
@@ -64,6 +70,16 @@ class TaskProgress
     def each: (?path) { (path, Node) -> void } -> void
             | (?path) -> Enumerator[[ path, Node ], void]
 
+    # What to draw, in the order of `each` - but where a task has more than `fold_over` children,
+    # the ones that are done (save the last `keep` to finish) are one Fold row ahead of the rest,
+    # and the ones still waiting (save the first `keep`) one Fold row after them. What is
+    # running, failed or canceled is always drawn. A Fold comes with its parent's path and
+    # `~done` or `~pending` after it, which no task id can be
+    # : (?path, ?fold_over: Integer, ?keep: Integer) { (path, Node | Fold) -> void } -> void
+    # : (?path, ?fold_over: Integer, ?keep: Integer) -> Enumerator[[path, Node | Fold], void]
+    def rows: (?path, ?fold_over: Integer, ?keep: Integer) { (path, Node | Fold) -> void } -> void
+            | (?path, ?fold_over: Integer, ?keep: Integer) -> Enumerator[[ path, Node | Fold ], void]
+
     # Folds one event in, or raises ArgumentError and leaves the state as it was
     # : (Event, at: Float, ?journal: Journal?) -> self
     def apply: (Event, at: Float, ?journal: Journal?) -> self
@@ -99,9 +115,10 @@ class TaskProgress
     # : () -> Hash[path, Hash[Symbol, untyped]]
     def to_h: () -> Hash[path, Hash[Symbol, untyped]]
 
-    # A frozen copy, safe to read from any thread
-    # : () -> State
-    def snapshot: () -> State
+    # A frozen copy, safe to read from any thread. Given an earlier snapshot of this state and the
+    # paths changed since, it copies only those, and takes the rest from the earlier one
+    # : (?State?, ?Enumerable[path]?) -> State
+    def snapshot: (?State?, ?Enumerable[path]?) -> State
 
     # A copy that can change without changing this one
     # : () -> State
@@ -111,7 +128,14 @@ class TaskProgress
     # : (Journal) -> void
     def rollback: (Journal) -> void
 
+    # The nodes themselves, for an earlier snapshot to lend a new one what has not changed
+    # : () -> Hash[path, Node]
+    def nodes: () -> Hash[path, Node]
+
     private
+
+    # : (Node) -> Node
+    def frozen: (Node) -> Node
 
     # : (Node) -> Integer
     def missing: (Node) -> Integer

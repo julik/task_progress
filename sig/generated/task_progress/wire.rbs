@@ -3,13 +3,17 @@
 class TaskProgress
   # A batch as JSON, one object per line:
   #
-  #     {"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0","00af"],"set",40],[["x3k0"],"note","Reading"]]}
+  #     {"v":1,"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0","00af"],"set",40],[["x3k0"],"note","Reading"]]}
   #
   # The reading side is meant for a writer we do not trust - a subprocess parsing hostile input,
   # a stream relayed from elsewhere - so nothing it sends is taken at its word: a batch with
   # anything wrong in it is dropped whole, numbers are clamped, strings scrubbed and cut, paths
   # bounded, and nothing in an error is ever turned into a class
   module Wire
+    # The version of the format every batch carries as `v`. A reader takes only its own: a batch
+    # from a newer writer is dropped, as a garbled one would be, rather than half understood
+    VERSION: Integer
+
     # The longest line a reader takes - see the MANUAL for what every limit is for
     LINE_LIMIT: Integer
 

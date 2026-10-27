@@ -53,6 +53,26 @@ class BenchAppTest < Minitest::Test
     assert_match(/Simulated failure/, root.error[:message])
   end
 
+  def test_a_lost_worker_is_retried_as_attempt_two
+    job = start("handoff", speed: 4)
+    batches(job["events"])
+    root = @app.jobs.find { it.id == job["id"] }.root
+    mounted = root.subtasks.first
+    assert_equal [:done, 2], [mounted.status, mounted.node.attempt]
+    assert_equal [["Thumbnails", 40]], mounted.subtasks.map { [it.name, it.count] }, "the lost run is gone"
+  end
+
+  def test_a_job_can_be_long_polled
+    job = start("waiting", speed: 1)
+    response = @request.get(job["poll"])
+    assert_equal 200, response.status
+    assert TaskProgress::Wire.parse(response.body).reset?
+    etag = response.headers["etag"]
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    assert_equal 200, @request.get("#{job["poll"]}?wait=5", "HTTP_IF_NONE_MATCH" => etag).status, "answered with news"
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 4
+  end
+
   def test_cancel_cancels_the_job
     job = start("waiting", speed: 1)
     sleep 0.2

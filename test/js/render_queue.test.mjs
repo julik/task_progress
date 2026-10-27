@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { TaskTree, applyBatchTo, followBatches, pathKey, pathFromKey } from "../../js/task_tree.js"
 import { RenderQueue } from "../../js/render_queue.js"
 
-const batch = (seq, ops, prev = seq - 1) => ({ log: "w", prev, seq, at: seq, ops })
+const batch = (seq, ops, prev = seq - 1) => ({ v: 1, log: "w", prev, seq, at: seq, ops })
 
 // Frames come only when the test says so
 function setup() {
@@ -89,11 +89,12 @@ test("a closed queue draws nothing more", () => {
 
 test("applyBatchTo folds a batch into the tree in place", () => {
   const tree = new TaskTree()
-  assert.equal(applyBatchTo({ log: "w", prev: 0, seq: 1, at: 1, ops: [[[], "open", { name: "root" }], [["a"], "open", { name: "a" }]] }, tree), "applied")
-  assert.equal(applyBatchTo({ log: "w", prev: 1, seq: 2, at: 2, ops: [[["a"], "add", 3]] }, tree), "applied")
+  assert.equal(applyBatchTo({ v: 1, log: "w", prev: 0, seq: 1, at: 1, ops: [[[], "open", { name: "root" }], [["a"], "open", { name: "a" }]] }, tree), "applied")
+  assert.equal(applyBatchTo({ v: 1, log: "w", prev: 1, seq: 2, at: 2, ops: [[["a"], "add", 3]] }, tree), "applied")
   assert.equal(tree.get(["a"]).count, 3)
-  assert.equal(applyBatchTo({ log: "w", prev: 1, seq: 2, at: 2, ops: [[["a"], "add", 3]] }, tree), "duplicate")
-  assert.equal(applyBatchTo({ log: "w", prev: 7, seq: 8, at: 3, ops: [] }, tree), "gap")
+  assert.equal(applyBatchTo({ v: 1, log: "w", prev: 1, seq: 2, at: 2, ops: [[["a"], "add", 3]] }, tree), "duplicate")
+  assert.equal(applyBatchTo({ v: 1, log: "w", prev: 7, seq: 8, at: 3, ops: [] }, tree), "gap")
+  assert.equal(applyBatchTo({ v: 2, log: "w", prev: 0, seq: 9, at: 4, ops: [] }, tree), "unsupported", "a newer writer is left alone")
   assert.equal(tree.stale, true)
 })
 
@@ -101,9 +102,9 @@ test("followBatches folds what is pushed and draws once a frame", () => {
   const frames = []
   let pending = null
   const following = followBatches((tree, changes) => frames.push([tree.get(["a"]).count, changes.batches]), { schedule: (fn) => (pending = fn) })
-  following.push({ log: "w", prev: 0, seq: 1, at: 1, ops: [[[], "open", { name: "root" }], [["a"], "open", { name: "a" }]] })
-  for (let seq = 2; seq <= 10; seq++) assert.equal(following.push({ log: "w", prev: seq - 1, seq, at: seq, ops: [[["a"], "add", 1]] }), "applied")
-  assert.equal(following.push({ log: "w", prev: 40, seq: 41, at: 41, ops: [] }), "gap")
+  following.push({ v: 1, log: "w", prev: 0, seq: 1, at: 1, ops: [[[], "open", { name: "root" }], [["a"], "open", { name: "a" }]] })
+  for (let seq = 2; seq <= 10; seq++) assert.equal(following.push({ v: 1, log: "w", prev: seq - 1, seq, at: seq, ops: [[["a"], "add", 1]] }), "applied")
+  assert.equal(following.push({ v: 1, log: "w", prev: 40, seq: 41, at: 41, ops: [] }), "gap")
   pending()
   assert.deepEqual(frames, [[9, 11]])
 })

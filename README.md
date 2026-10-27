@@ -15,7 +15,7 @@ Any run of batches can be squashed into one, and a reader that joins late starts
 </picture>
 </div>
 
-The [MANUAL](MANUAL.md) has everything; this page has what you need first.
+The [MANUAL](MANUAL.md) has everything, and [RECIPES](RECIPES.md) whole setups to copy from - a Rails job polled from a page, subprocesses drawn in one terminal, a Rails action streaming to React. This page has what you need first.
 
 ## Install
 
@@ -90,7 +90,26 @@ and draw it with the browser client that ships in `js/` (`TaskProgress.js_path`)
 <div data-controller="task-tree" data-task-tree-url-value="/jobs/42/progress"></div>
 ```
 
-For a job that runs elsewhere, publish its batches to a stream (`PublishingOutput`, made for Sossego) and serve that. Work that runs in the browser itself can be grafted under a server task with `LocalTasks`.
+Where SSE does not get through, `TaskProgress::Poll` answers plain GETs - with a 304 while nothing changed - and `followPollingAt` polls it. Work that runs in the browser itself can be grafted under a server task with `LocalTasks`.
+
+## Handing work off
+
+Create the tree here, and let a job write to it there - through Redis:
+
+```ruby
+TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+
+import = TaskProgress.handoff("Importing", cancelable: true)
+ImportJob.perform_later(upload, import)                    # the task is an argument like any other
+
+def perform(upload, import)                                # ...and arrives adopted: perform is its work
+  import.subtask("Rows", total: upload.rows) { |rows| ... }
+end
+
+TaskProgress::SSE.response(TaskProgress.follow(import.key), close: true)  # anywhere that reaches Redis
+```
+
+The page shows the job queued before a worker has it. A worker that dies goes stale, then fails; a retry starts the tree over as attempt 2. `task_progress watch KEY` draws it in a terminal.
 
 ## Across processes
 

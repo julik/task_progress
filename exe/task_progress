@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require_relative "../lib/task_progress"
+
+url = ENV.fetch("REDIS_URL", "redis://localhost:6379")
+parser = OptionParser.new do |o|
+  o.banner = <<~TEXT
+    Usage: task_progress watch KEY [--redis URL]
+
+    Draws a tree handed off with TaskProgress.handoff - running anywhere that reaches the same
+    Redis - until it finishes. Exits 0 if it was done, 1 if not. Ctrl-C stops watching, and
+    leaves the work alone.
+
+  TEXT
+  o.on("--redis URL", "Where the tree is kept (REDIS_URL, or #{url})") { url = it }
+end
+command, key = parser.parse(ARGV)
+abort(parser.help) unless command == "watch" && key
+
+begin
+  require "redis-client"
+rescue LoadError
+  abort "task_progress watch needs the redis-client gem"
+end
+
+TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url:).new_pool(size: 2))
+abort "Nothing was handed off at #{key}, or it has expired" unless TaskProgress::StreamReader.new(TaskProgress.stream, key).snapshot
+tree = TaskProgress.follow(key)
+output = TaskProgress.cli_output(io: $stderr, quiet: false)
+tree.add_output(output)
+begin
+  sleep 0.1 until tree.finished?
+rescue Interrupt
+  nil
+ensure
+  tree.log.close
+  TaskProgress.close(output)
+end
+exit(tree.done? ? 0 : 1)

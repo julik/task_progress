@@ -13,8 +13,8 @@ class TaskProgress
   #     headers.merge!(TaskProgress::SSE::HEADERS)
   #     self.response_body = TaskProgress::SSE.new(task)
   #
-  # The tree must live in the serving process. For one that lives in a job elsewhere, have the
-  # job publish to a stream (PublishingOutput) and serve that
+  # The tree must live in the serving process. For one that lives in a job elsewhere - handed
+  # off with TaskProgress.handoff - stream `TaskProgress.follow(key)` with `close: true`
   class SSE
     # What an SSE response is sent with
     HEADERS: Hash[String, String]
@@ -25,6 +25,8 @@ class TaskProgress
 
     @retry_ms: Integer
 
+    @close: bool
+
     # A whole Rack response: status, headers and this body
     # : (TaskProgress | Log, **untyped) -> [Integer, Hash[String, String], SSE]
     def self.response: (TaskProgress | Log, **untyped) -> [ Integer, Hash[String, String], SSE ]
@@ -33,9 +35,13 @@ class TaskProgress
     # : (Batch) -> String
     def self.frame: (Batch) -> String
 
-    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of quiet, and telling the browser to reconnect after `retry_ms`
-    # : (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer) -> void
-    def initialize: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer) -> void
+    # Streams the task - its subtree only, for a subtask - pinging every `heartbeat` seconds of
+    # quiet, and telling the browser to reconnect after `retry_ms`. With `close: true` it closes
+    # the task's log once the stream ends - for a tree followed only for this stream:
+    #
+    #     TaskProgress::SSE.response(TaskProgress.follow(key), close: true)
+    # : (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer, ?close: bool) -> void
+    def initialize: (TaskProgress | Log, ?heartbeat: Integer | Float, ?retry_ms: Integer, ?close: bool) -> void
 
     # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
     # : () { (String) -> void } -> void

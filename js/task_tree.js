@@ -3,6 +3,7 @@
 // demos both sit on top of it.
 //
 //   followEventSourceAt(url, onChange)   a TaskProgress::SSE stream, drawn at most once a frame
+//   followPollingAt(url, onChange)       a TaskProgress::Poll endpoint, for where SSE does not get through
 //   followBatches(onChange)              the same, for batches you get some other way
 //   applyBatchTo(batch, tree)            folds one batch into a tree, in place
 //   tree.graft(path, localTasks)         draws tasks running in this browser under a server task
@@ -14,14 +15,23 @@ export { pathKey, pathFromKey } from "./paths.js"
 const parentKey = (path) => key(path.slice(0, -1))
 
 const blankNode = (path, at) => ({
-  path, name: "", total: null, count: 0, percent: 0, weight: 1, expect: null, indeterminate: false, cancelable: false,
+  path, name: "", total: null, count: 0, percent: 0, weight: 1, expect: null, indeterminate: false, cancelable: false, attempt: null,
   unit: null, message: null, status: "pending", error: null, stale: false,
   opened_at: at, started_at: null, finished_at: null, children: []
 })
 
+// The wire format's version, as TaskProgress::Wire::VERSION - a batch from a newer writer is
+// left alone rather than half understood
+export const WIRE_VERSION = 1
+
+// Siblings past FOLD_OVER are folded by TaskTree#rows, keeping FOLD_KEEP of the done and of the
+// waiting ones - as TaskProgress::State#rows does
+export const FOLD_OVER = 12
+export const FOLD_KEEP = 3
+
 const FINISHED = new Set(["done", "failed", "canceled"])
 const ENDED_WITHOUT_DONE = new Set(["failed", "canceled"])
-const ATTRIBUTES = ["name", "total", "weight", "expect", "indeterminate", "unit", "cancelable"]
+const ATTRIBUTES = ["name", "total", "weight", "expect", "indeterminate", "unit", "cancelable", "attempt"]
 const FIELDS = [...ATTRIBUTES, "count", "percent", "message", "status", "error", "stale", "opened_at", "started_at", "finished_at"]
 
 export class TaskTree {
@@ -42,8 +52,10 @@ export class TaskTree {
   now() { return this.clock() - (this.offset ?? 0) }
 
   // Returns "applied", "duplicate" for a batch it already has, or "gap" when the batch does not follow the last one - the tree is then
-  // stale, and stays so until a batch with prev 0 (a fresh squash) replaces it
+  // stale, and stays so until a batch with prev 0 (a fresh squash) replaces it. A batch in
+  // another version of the format is "unsupported", and changes nothing
   apply(batch) {
+    if (batch.v !== WIRE_VERSION) return "unsupported"
     if (batch.prev === 0) {
       this.nodes = new Map()
     } else if (batch.log === this.log && batch.seq <= this.seq) {
@@ -129,6 +141,29 @@ export class TaskTree {
     if (!node) return
     yield node
     for (const child of this.childrenOf(node)) yield* this.each(child)
+  }
+
+  // What to draw, in the order of `each` - but where a task has more than `foldOver` children, the
+  // ones that are done (save the last `keep` to finish) are one row ahead of the rest, and the
+  // ones still waiting (save the first `keep`) one row after them, see TaskProgress::State#rows.
+  // A folded row is { fold: true, path, status, count }, its path its parent's and `~done` or
+  // `~pending`, which no task id can be
+  *rows(node = this.root, { foldOver = FOLD_OVER, keep = FOLD_KEEP } = {}) {
+    if (!node) return
+    yield node
+    const kids = this.childrenOf(node)
+    const options = { foldOver, keep }
+    if (kids.length <= foldOver) {
+      for (const kid of kids) yield* this.rows(kid, options)
+      return
+    }
+    const done = kids.filter((kid) => this.complete(kid))
+    const kept = new Set([...done].sort((a, b) => (b.finished_at ?? 0) - (a.finished_at ?? 0)).slice(0, keep))
+    const pending = kids.filter((kid) => kid.status === "pending")
+    const folded = new Set([...done.filter((kid) => !kept.has(kid)), ...pending.slice(keep)])
+    if (done.length > kept.size) yield { fold: true, path: [...node.path, "~done"], status: "done", count: done.length - kept.size }
+    for (const kid of kids) if (!folded.has(kid)) yield* this.rows(kid, options)
+    if (pending.length > keep) yield { fold: true, path: [...node.path, "~pending"], status: "pending", count: pending.length - keep }
   }
 
   // Done, and everything under it ended - see TaskProgress::State#complete?
@@ -270,15 +305,64 @@ export function followEventSourceAt(url, onChange, options = {}) {
   return { tree, close: () => { source.close(); following.close() } }
 }
 
+// Polls a TaskProgress::Poll endpoint at `url`, see followBatches - for where an EventSource does
+// not get through. Every answer is the whole tree, and its ETag goes back in If-None-Match, so a
+// tree that has not changed costs a 304. Polls every `interval` milliseconds; with `wait` (in
+// seconds) the server holds each poll until something changes, up to that long, and the next
+// one goes out at once - long polling. A poll that fails is tried again later and later, up to
+// half a minute apart. It stops once the root has finished
+export function followPollingAt(url, onChange, { interval = 1000, wait = 0, ...options } = {}) {
+  const following = followBatches(onChange, options)
+  const { tree } = following
+  const target = wait ? `${url}${url.includes("?") ? "&" : "?"}wait=${wait}` : url
+  let etag = null
+  let stopped = false
+  let timer = null
+  let controller = null
+  let delay = interval
+  const poll = async () => {
+    controller = new AbortController()
+    try {
+      const response = await fetch(target, { headers: etag ? { "if-none-match": etag } : {}, cache: "no-store", signal: controller.signal })
+      if (response.status === 200) {
+        const batch = await response.json()
+        etag = response.headers.get("etag")
+        following.push(batch)
+      } else if (response.status !== 304) {
+        throw new Error(`Polling ${url} got a ${response.status}`)
+      }
+      delay = interval
+    } catch {
+      if (stopped) return
+      delay = Math.min(Math.max(delay, interval) * 2, 30000)
+    }
+    if (stopped || (tree.root && FINISHED.has(tree.root.status))) return
+    timer = setTimeout(poll, wait && delay === interval ? 0 : delay)
+  }
+  poll()
+  return {
+    tree,
+    close: () => {
+      stopped = true
+      clearTimeout(timer)
+      controller?.abort()
+      following.close()
+    }
+  }
+}
+
 // Asks the server to cancel a task, by creating a cancellation: posts JSON with the task's path
 // (its pathKey) and the token the server issued for this tree. The server decides -
 // a task is only ever ended by its own tree - so nothing changes here until the `cancel` comes
 // back down the stream. A request that comes too late is not an error: the server answers it as
 // "moot", and the row has already finished anyway
+//
+// On a Rails page it sends the page's CSRF token along, so `protect_from_forgery` lets it through
 export function requestCancel(url, path, { token } = {}) {
+  const csrf = globalThis.document?.querySelector('meta[name="csrf-token"]')?.content
   return fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(csrf ? { "x-csrf-token": csrf } : {}) },
     body: JSON.stringify({ path: key(path), token })
   })
 }

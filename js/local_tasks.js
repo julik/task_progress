@@ -49,12 +49,12 @@ export class LocalTasks {
   // The tree so far as one batch of puts, prev 0 - what a graft starts from
   squash() {
     const ops = [...this.tree.each()].map((node) => [node.path, "put", putValue(node)])
-    return { log: this.log, prev: 0, seq: this.seq, at: this.clock(), ops }
+    return { v: 1, log: this.log, prev: 0, seq: this.seq, at: this.clock(), ops }
   }
 
   commit(ops) {
     if (ops.length === 0) return
-    const batch = { log: this.log, prev: this.seq, seq: this.seq + 1, at: this.clock(), ops }
+    const batch = { v: 1, log: this.log, prev: this.seq, seq: this.seq + 1, at: this.clock(), ops }
     this.tree.apply(batch)
     this.seq = batch.seq
     for (const listener of this.listeners) listener(batch)
@@ -222,7 +222,7 @@ export function trackUpload(xhr, task, { abortOnCancel = false } = {}) {
   return task
 }
 
-const FIELDS = ["name", "total", "count", "percent", "weight", "expect", "indeterminate", "unit", "cancelable", "message", "status", "error", "stale", "opened_at", "started_at", "finished_at"]
+const FIELDS = ["name", "total", "count", "percent", "weight", "expect", "indeterminate", "unit", "cancelable", "attempt", "message", "status", "error", "stale", "opened_at", "started_at", "finished_at"]
 
 function putValue(node) {
   return Object.fromEntries(FIELDS.filter((field) => node[field] !== null && node[field] !== undefined && node[field] !== false).map((field) => [field, node[field]]))

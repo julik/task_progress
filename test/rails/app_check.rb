@@ -4,6 +4,7 @@ require "bundler/setup"
 require "logger"
 require "rails"
 require "action_controller/railtie"
+require "active_job/railtie"
 require "action_cable/engine"
 require "active_model"
 require "turbo-rails"
@@ -33,7 +34,81 @@ class Import
   def to_param = id.to_s
 end
 
+class ImportJob < ActiveJob::Base
+  retry_on RuntimeError, wait: 0, attempts: 2
+  cattr_accessor :failing, :seen
+
+  def perform(rows, import)
+    self.class.seen = import
+    import.subtask("Rows", total: rows) do |t|
+      rows.times { t.tick! }
+      raise "flaky" if self.class.failing && executions == 1
+    end
+  end
+end
+
+# What RECIPES.md shows, as it shows it
+class UploadsController < ActionController::Base
+  KEYS = {}
+
+  def create
+    import = TaskProgress.handoff("Importing", cancelable: true)
+    KEYS[params[:id]] = import.key
+    ImportJob.perform_later(3, import)
+    head :accepted
+  end
+
+  def progress
+    status, headers, body = TaskProgress::Poll.response(TaskProgress.fetch(KEYS.fetch(params[:id])), request.env)
+    response.headers.merge!(headers)
+    self.status = status
+    self.response_body = body
+  end
+
+  def cancel
+    TaskProgress.fetch(KEYS.fetch(params[:id])).request_cancel(params[:path].to_s, "Canceled from the page")
+    head :accepted
+  end
+end
+
+class ReportsController < ActionController::Base
+  include ActionController::Live
+
+  def build
+    response.headers.merge!(TaskProgress::SSE::HEADERS)
+    root = TaskProgress.new("Building the report", cancelable: true)
+    work = Thread.new do
+      Rails.application.executor.wrap do
+        root.run { |r| r.subtask("Rows", total: 3) { |rows| 3.times { rows.tick! && sleep(0.01) } } }
+      end
+    end
+    TaskProgress::SSE.new(root).each { response.stream.write(it) }
+  rescue ActionController::Live::ClientDisconnected
+    root.cancel!("Nobody is watching any more")
+  ensure
+    work&.join
+    response.stream.close
+  end
+end
+
+CheckApp.routes.append do
+  post "/uploads/:id" => "uploads#create"
+  get "/uploads/:id/progress" => "uploads#progress"
+  post "/uploads/:id/cancel" => "uploads#cancel"
+  get "/reports/build" => "reports#build"
+end
+CheckApp.reload_routes!
+
 class RailsAppCheck < Minitest::Test
+  # The test adapter keeps what is enqueued - a retry included - and this runs it all, through
+  # the queue's own serialization, until nothing is left
+  def perform_enqueued_jobs
+    adapter = ActiveJob::Base.queue_adapter = ActiveJob::QueueAdapters::TestAdapter.new
+    yield
+    while (job = adapter.enqueued_jobs.shift)
+      ActiveJob::Base.execute(job.select { |k, _| k.is_a?(String) })
+    end
+  end
   def setup = Rails.cache.clear
 
   def import = @import ||= Import.new(id: 7)
@@ -83,5 +158,56 @@ class RailsAppCheck < Minitest::Test
     assert_equal [200, "text/vnd.turbo-stream.html"], [response.status, response.content_type]
     assert_equal :carried_on, worker.value, "the job picked the request out of Rails.cache, and canceled the task"
     assert_equal 403, Rack::MockRequest.new(Rails.application).post("/task_progress/cancellations", params: form.merge(token: "forged")).status
+  end
+
+  def test_a_tree_goes_to_a_job_as_an_argument_and_the_job_is_its_work
+    ImportJob.failing = false
+    import = TaskProgress.handoff("Importing")
+    perform_enqueued_jobs { ImportJob.perform_later(3, import) }
+    refute_same import, ImportJob.seen, "it went through the queue, as a key"
+    assert_equal import.key, ImportJob.seen.key
+    tree = TaskProgress.fetch(import.key)
+    assert tree.done?, "done when perform returned"
+    assert_equal [["Rows", 3]], tree.subtasks.map { [it.name, it.count] }
+  end
+
+  def test_a_retried_job_starts_its_tree_over
+    ImportJob.failing = true
+    import = TaskProgress.handoff("Importing")
+    perform_enqueued_jobs { ImportJob.perform_later(2, import) }
+    tree = TaskProgress.fetch(import.key)
+    assert tree.done?
+    assert_equal 2, tree.node.attempt
+    assert_equal [["Rows", :done]], tree.subtasks.map { [it.name, it.status] }
+  end
+
+  def test_the_polling_recipe
+    app = Rack::MockRequest.new(Rails.application)
+    perform_enqueued_jobs { assert_equal 202, app.post("/uploads/1").status }
+    response = app.get("/uploads/1/progress")
+    assert_equal [200, "application/json"], [response.status, response.content_type]
+    tree = TaskProgress::Wire.parse(response.body)
+    assert_equal ["Importing", "Rows"], tree.events.map { it.value[:name] }
+    assert_equal 304, app.get("/uploads/1/progress", "HTTP_IF_NONE_MATCH" => response.headers["etag"]).status
+  end
+
+  def test_the_browser_client_is_served_as_it_is
+    response = Rack::MockRequest.new(Rails.application).get("/task_progress/js/react_task_tree.js")
+    assert_equal 200, response.status
+    assert_includes response.body, 'from "./task_tree.js"', "relative imports, which resolve next to it"
+  end
+
+  def test_the_sse_recipe
+    response = Rack::MockRequest.new(Rails.application).get("/reports/build")
+    assert_equal 200, response.status
+    assert_equal "text/event-stream", response.content_type
+    frames = response.body.scan(/^data: (.*)$/).flatten.map { TaskProgress::Wire.parse(it) }
+    state = TaskProgress::State.new
+    frames.each { |batch| (state = TaskProgress::State.new) if batch.reset?; batch.events.each { state.apply(it, at: batch.at) } }
+    assert state.complete?, "streamed to the end"
+  end
+
+  def test_a_task_from_this_process_alone_cannot_go_to_a_job
+    assert_raises(ActiveJob::SerializationError) { ImportJob.perform_later(1, TaskProgress.new("local")) }
   end
 end

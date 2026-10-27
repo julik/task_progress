@@ -72,8 +72,8 @@ class TaskProgress
     # The lines for a snapshot, without the terminal control around them
     #: (State, ?width: Integer, ?height: Integer) -> Array[String]
     def lines(snapshot, width: columns, height: rows)
-      shown = [] #: Array[[path?, Node | Integer]]
-      snapshot.each do |path, node|
+      shown = [] #: Array[[path?, Node | Fold | Integer]]
+      snapshot.rows do |path, node|
         next if path.length.positive? && hidden?(snapshot, path)
         shown << [path, node]
       end
@@ -133,7 +133,7 @@ class TaskProgress
     end
 
     # What fits in `room` lines - the last of them saying how many more there are
-    #: (Array[[path?, Node | Integer]], Integer) -> Array[[path?, Node | Integer]]
+    #: (Array[[path?, Node | Fold | Integer]], Integer) -> Array[[path?, Node | Fold | Integer]]
     def trim(shown, room)
       room = [room, 2].max
       %i[done pending].each do |status|
@@ -142,18 +142,20 @@ class TaskProgress
         shown = shown.each_with_index.reject { |(_, node), i| i.positive? && node.is_a?(Node) && node.status == status && (excess -= 1) >= 0 }.map(&:first)
       end
       return shown if shown.length <= room
-      more = [nil, shown.length - room + 1] #: [path?, Node | Integer]
+      more = [nil, shown.length - room + 1] #: [path?, Node | Fold | Integer]
       shown.first(room - 1) + [more]
     end
 
-    #: (State, path?, Node | Integer, Integer) -> String
+    #: (State, path?, Node | Fold | Integer, Integer) -> String
     def line(snapshot, path, node, width)
       return "  … #{node} more" if path.nil? || node.is_a?(Integer)
       indent = "  " * path.length
+      return "#{indent}#{(node.status == :done) ? "✓" : "·"} #{node.name}"[0, width - 1].to_s if node.is_a?(Fold)
       parts = ["#{indent}#{icon(node)} #{node.name}"] #: Array[String?]
       parts << measure(snapshot, path, node)
       parts << pace(node) if node.status == :active && node.children.empty?
       parts << elapsed(node)
+      parts << "attempt #{node.attempt}" if node.attempt.to_i > 1
       parts << (node.status == :failed ? node.error&.dig(:message) : node.message)
       parts.compact.reject(&:empty?).join("  ")[0, width - 1].to_s
     end

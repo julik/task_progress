@@ -7,11 +7,15 @@ class TaskProgress
   # thread-safe on its own - the Log holds its lock around every apply
   class State
     # What an `open` or a `meta` may set
-    ATTRIBUTES = %i[name total weight expect indeterminate unit cancelable].freeze #: Array[Symbol]
+    ATTRIBUTES = %i[name total weight expect indeterminate unit cancelable attempt].freeze #: Array[Symbol]
     CHILD_IDS = 36**4 #: Integer - four base36 characters
+    # Siblings past this many are folded by `rows`...
+    FOLD_OVER = 12 #: Integer
+    # ...keeping this many of the done ones, the latest to finish, and of the ones waiting, the first
+    FOLD_KEEP = 3 #: Integer
     ENDINGS = {done: :done, fail: :failed, cancel: :canceled}.freeze #: Hash[Symbol, Symbol]
     # What a `put` carries - a Node, less what never goes over the wire
-    FIELDS = %i[name total count percent weight expect indeterminate unit cancelable message status error stale
+    FIELDS = %i[name total count percent weight expect indeterminate unit cancelable attempt message status error stale
       opened_at started_at finished_at].freeze #: Array[Symbol]
     private_constant :CHILD_IDS, :ENDINGS
 
@@ -75,6 +79,28 @@ class TaskProgress
       node = @nodes[path] or return
       yield path, node
       node.children.each { each([*path, it].freeze, &block) }
+    end
+
+    # What to draw, in the order of `each` - but where a task has more than `fold_over` children,
+    # the ones that are done (save the last `keep` to finish) are one Fold row ahead of the rest,
+    # and the ones still waiting (save the first `keep`) one Fold row after them. What is
+    # running, failed or canceled is always drawn. A Fold comes with its parent's path and
+    # `~done` or `~pending` after it, which no task id can be
+    #: (?path, ?fold_over: Integer, ?keep: Integer) { (path, Node | Fold) -> void } -> void
+    #: (?path, ?fold_over: Integer, ?keep: Integer) -> Enumerator[[path, Node | Fold], void]
+    def rows(path = [], fold_over: FOLD_OVER, keep: FOLD_KEEP, &block)
+      return enum_for(:rows, path, fold_over:, keep:) unless block
+      node = @nodes[path] or return
+      yield path, node
+      kids = node.children.map { [*path, it].freeze }
+      return kids.each { rows(it, fold_over:, keep:, &block) } if kids.length <= fold_over
+      done = kids.select { complete?(it) }
+      kept = done.max_by(keep) { @nodes.fetch(it).finished_at || 0.0 }
+      pending = kids.select { @nodes.fetch(it).status == :pending }
+      folded = Set.new(done - kept) | pending.drop(keep)
+      yield [*path, "~done"].freeze, Fold.new(status: :done, count: done.length - kept.length) if done.length > kept.length
+      kids.each { rows(it, fold_over:, keep:, &block) unless folded.include?(it) }
+      yield [*path, "~pending"].freeze, Fold.new(status: :pending, count: pending.length - keep) if pending.length > keep
     end
 
     # Folds one event in, or raises ArgumentError and leaves the state as it was
@@ -214,10 +240,14 @@ class TaskProgress
     #: () -> Hash[path, Hash[Symbol, untyped]]
     def to_h = @nodes.transform_values(&:to_h)
 
-    # A frozen copy, safe to read from any thread
-    #: () -> State
-    def snapshot
-      State.new(@nodes.to_h { |path, node| [path, node.deep_dup.tap { it.children.freeze }.freeze] }.freeze).freeze
+    # A frozen copy, safe to read from any thread. Given an earlier snapshot of this state and the
+    # paths changed since, it copies only those, and takes the rest from the earlier one
+    #: (?State?, ?Enumerable[path]?) -> State
+    def snapshot(previous = nil, changed = nil)
+      return State.new(@nodes.to_h { |path, node| [path, frozen(node)] }.freeze).freeze unless previous && changed
+      nodes = previous.nodes.dup
+      changed.each { |path| (node = @nodes[path]) ? nodes[path] = frozen(node) : nodes.delete(path) }
+      State.new(nodes.freeze).freeze
     end
 
     # A copy that can change without changing this one
@@ -228,7 +258,16 @@ class TaskProgress
     #: (Journal) -> void
     def rollback(journal) = journal.rollback(@nodes)
 
+    protected
+
+    # The nodes themselves, for an earlier snapshot to lend a new one what has not changed
+    #: () -> Hash[path, Node]
+    def nodes = @nodes
+
     private
+
+    #: (Node) -> Node
+    def frozen(node) = node.deep_dup.tap { it.children.freeze }.freeze
 
     #: (Node) -> Integer
     def missing(node) = [(node.expect || 0) - node.children.length, 0].max

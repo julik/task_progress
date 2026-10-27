@@ -1,0 +1,85 @@
+# Generated from lib/task_progress/stream_output.rb with RBS::Inline
+
+class TaskProgress
+  # Writes a tree to a stream - a MemoryStream, a RedisStream - for readers anywhere to follow
+  # with StreamReader. What TaskProgress.handoff and TaskProgress.adopt write through. Under one
+  # key it keeps:
+  #
+  #     key            every batch, one entry each
+  #     key:snapshot   the tree squashed into one batch, and the id of the entry it is as of -
+  #                    where a reader starts, so the stream before it can be trimmed away
+  #     key:beat       there while the writer is alive, and gone a few seconds after it is not
+  #     key:control    cancel requests, the other way - see Mount#follow_stream
+  #
+  # A snapshot is taken at the first batch, every `snapshot_every` seconds after, and when the
+  # root finishes, and each one trims the stream back to the one before it. Once the root has
+  # finished, all of it expires `retain` seconds later.
+  #
+  # With `beat`, every so many seconds it marks itself alive and takes the cancel requests that
+  # came, on a thread of its own - from the first batch until the root finishes or it is closed
+  class StreamOutput
+    # The key it writes under
+    attr_reader key: String
+
+    @stop: Thread::Queue
+
+    @beating: Thread?
+
+    @snapped_at: Float
+
+    @snapshot_id: String?
+
+    @state: State
+
+    @retain: Integer | Float
+
+    @snapshot_every: Integer | Float
+
+    @beat: (Integer | Float)?
+
+    @stream: untyped
+
+    # The key of the squashed tree a reader starts from
+    # : (String) -> String
+    def self.snapshot_key: (String) -> String
+
+    # The key that is there while the writer is alive
+    # : (String) -> String
+    def self.beat_key: (String) -> String
+
+    # The key cancel requests are appended to
+    # : (String) -> String
+    def self.control_key: (String) -> String
+
+    # A key for a new tree. The braces make it a Redis Cluster hash tag, so all four keys of a
+    # tree land on the same node
+    # : (String) -> String
+    def self.key_for: (String) -> String
+
+    # Writes to `stream` under `key`
+    # : (untyped, String, ?beat: (Integer | Float)?, ?snapshot_every: Integer | Float, ?retain: Integer | Float) -> void
+    def initialize: (untyped, String, ?beat: (Integer | Float)?, ?snapshot_every: Integer | Float, ?retain: Integer | Float) -> void
+
+    # Appends the batch, and takes a snapshot when one is due
+    # : (Batch, Log) -> void
+    def call: (Batch, Log) -> void
+
+    # Stops beating, and taking cancel requests - the work is over, one way or another
+    # : () -> void
+    def close: () -> void
+
+    private
+
+    # : () -> Float
+    def now: () -> Float
+
+    # : () -> void
+    def stop: () -> void
+
+    # : (String, Batch) -> void
+    def snapshot: (String, Batch) -> void
+
+    # : (Log) -> void
+    def beat: (Log) -> void
+  end
+end

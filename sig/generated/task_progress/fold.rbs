@@ -1,0 +1,25 @@
+# Generated from lib/task_progress/fold.rb with RBS::Inline
+
+class TaskProgress
+  # :nodoc:
+  class Fold < Data
+    attr_reader status(): Symbol
+
+    attr_reader count(): Integer
+
+    def self.new: (Symbol status, Integer count) -> instance
+                | (status: Symbol, count: Integer) -> instance
+
+    def self.members: () -> [ :status, :count ]
+
+    def members: () -> [ :status, :count ]
+  end
+
+  # Siblings drawn as one row - "✓ 9,812 more done", "· 340 more waiting" - so a task with ten
+  # thousand children draws as a handful of rows. See State#rows, which makes them
+  class Fold
+    # What the row says
+    # : () -> String
+    def name: () -> String
+  end
+end

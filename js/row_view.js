@@ -7,8 +7,10 @@ const FINISHED = new Set(["done", "failed", "canceled"])
 // A circle with a cross in it, drawn in the row's text color - the same in every font
 export const CANCEL_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 
-// What one row shows, worked out once for both demos
+// What one row shows, worked out once for both demos - a task, or siblings folded into one row
+// (see TaskTree#rows)
 export function rowView(tree, node) {
+  if (node.fold) return foldView(node)
   const percent = tree.percentOf(node)
   const leaf = node.children.length === 0
   const indeterminate = leaf && node.indeterminate && node.status === "active"
@@ -29,7 +31,17 @@ export function rowView(tree, node) {
     local: node.path.some((id) => String(id).startsWith("_")), // runs in this browser, see LocalTasks
     cancelable: !!node.cancelable && !FINISHED.has(node.status),
     percent, indeterminate, measure, icon,
-    message: node.status === "failed" ? node.error?.message ?? "" : [pace(tree, node), node.message].filter(Boolean).join(" · ")
+    message: [node.attempt > 1 ? `attempt ${node.attempt}` : null,
+      node.status === "failed" ? node.error?.message : [pace(tree, node), node.message].filter(Boolean).join(" · ")].filter(Boolean).join(" · ")
+  }
+}
+
+function foldView({ path, status, count }) {
+  const done = status === "done"
+  return {
+    key: pathKey(path), path, depth: path.length, name: `${count.toLocaleString("en-US")} more ${done ? "done" : "waiting"}`,
+    status, stale: false, local: false, cancelable: false, folded: true,
+    percent: done ? 100 : 0, indeterminate: false, measure: "", icon: `<span>${GLYPHS[status]}</span>`, message: ""
   }
 }
 

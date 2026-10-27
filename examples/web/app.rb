@@ -94,6 +94,9 @@ class BenchApp
       job = find($1) or return [404, {}, ["no such job"]]
       renderer = TaskProgress::HTMLRenderer.new(id: "turbo-tree", cancel_url: "/jobs/#{job.id}/cancellations", cancel_token: @tokens.issue(job.id))
       [200, TaskProgress::TurboSSE::HEADERS.dup, TaskProgress::TurboSSE.new(job.root, renderer:, source: "turbo-source")]
+    in ["GET", %r{\A/jobs/(\w+)/poll\z}]
+      job = find($1) or return [404, {}, ["no such job"]]
+      TaskProgress::Poll.response(job.root, env, max_wait: 10)
     in ["GET", %r{\A/jobs/(\w+)/events\z}]
       job = find($1) or return [404, {}, ["no such job"]]
       drop_after = Integer(request.params["drop_after"], exception: false)
@@ -113,7 +116,7 @@ class BenchApp
 
   def describe(job)
     root = job.root
-    {id: job.id, scenario: job.scenario, events: "/jobs/#{job.id}/events", status: root.status,
+    {id: job.id, scenario: job.scenario, events: "/jobs/#{job.id}/events", poll: "/jobs/#{job.id}/poll", status: root.status,
      percent: root.percent, number: job.number,
      cancellations: "/jobs/#{job.id}/cancellations", cancel_token: @tokens.issue(job.id, expires_in: 3600)}
   end

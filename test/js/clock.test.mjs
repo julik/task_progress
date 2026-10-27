@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { TaskTree } from "../../js/task_tree.js"
 import { rowView } from "../../js/row_view.js"
 
-const batch = (seq, at, ops, prev = seq - 1) => ({ log: "w", prev, seq, at, ops })
+const batch = (seq, at, ops, prev = seq - 1) => ({ v: 1, log: "w", prev, seq, at, ops })
 
 test("elapsed time is measured on the writer's clock, whatever ours says", () => {
   let local = 1_000_000 // days ahead of the writer

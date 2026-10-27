@@ -3,5 +3,5 @@
 
 class TaskProgress
   # The gem's version
-  VERSION = "0.1.0" #: String
+  VERSION = "1.0.0" #: String
 end

@@ -58,7 +58,9 @@ function watch(job) {
   // The token is what lets this page cancel tasks in this job - the server issued it with the job
   $("stimulus-tree").dataset.taskTreeCancelUrlValue = job.cancellations
   $("stimulus-tree").dataset.taskTreeCancelTokenValue = job.cancel_token
-  $("stimulus-tree").dataset.taskTreeUrlValue = url
+  // Long polling, for where SSE does not get through - set before the url, which starts following
+  $("stimulus-tree").dataset.taskTreeWaitValue = $("poll").checked ? "10" : "0"
+  $("stimulus-tree").dataset.taskTreeUrlValue = $("poll").checked ? job.poll : url
   reactProps = { cancelUrl: job.cancellations, cancelToken: job.cancel_token, grafts: [] }
   react.followEventSourceAt(url, reactProps)
   inspector.follow(url)

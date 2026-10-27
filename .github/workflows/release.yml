@@ -1,0 +1,24 @@
+name: Release
+
+# Pushing a tag like v1.0.0 builds the gem and publishes it to RubyGems, through trusted publishing -
+# no API key in the repository. The tag must match TaskProgress::VERSION
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: rubygems
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - name: The tag matches the version
+        run: test "v$(ruby -Ilib -e 'require "task_progress/version"; print TaskProgress::VERSION')" = "${GITHUB_REF_NAME}"
+      - uses: rubygems/release-gem@v1

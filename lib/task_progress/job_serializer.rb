@@ -1,0 +1,51 @@
+# frozen_string_literal: true
+
+# ActiveJob's own serializers name Duration, DateTime and the rest as they load, and only Rails
+# loads those first - so outside Rails all of ActiveSupport has to come along
+require "active_support/all"
+require "active_job"
+
+class TaskProgress
+  # Lets a tree from TaskProgress.handoff go to an ActiveJob as an argument like any other - no
+  # ids to pass, nothing to look up:
+  #
+  #     import = TaskProgress.handoff("Importing", cancelable: true)
+  #     ImportJob.perform_later(upload, import)
+  #
+  #     class ImportJob < ApplicationJob
+  #       def perform(upload, import)
+  #         import.subtask("Rows", total: upload.rows) { |rows| ... }
+  #       end
+  #     end
+  #
+  # It goes into the queue as its key. Out of the queue it comes adopted - see TaskProgress.adopt -
+  # and the job's work is the root's: done when `perform` returns, failed when it raises, and a
+  # cancel stops it without failing the job. A retry adopts it anew, as attempt 2, and starts
+  # it over. The Railtie installs all of this; without Rails, call `install` once ActiveJob loads.
+  #
+  # Only a root that was handed off can go: a task that lives in this process alone has nowhere
+  # for a worker elsewhere to write to
+  class JobSerializer < ActiveJob::Serializers::ObjectSerializer
+    # Teaches ActiveJob to take trees as arguments, and runs every job that gets one as the tree's work
+    def self.install
+      ActiveJob::Serializers.add_serializers(self)
+      ActiveJob::Base.around_perform { |job, perform| TaskProgress.working_on(job.arguments) { perform.call } }
+    end
+
+    # Whether it is a TaskProgress
+    def serialize?(argument) = argument.is_a?(TaskProgress)
+
+    # Its key, and nothing else
+    def serialize(task)
+      key = task.key or raise ActiveJob::SerializationError,
+        "#{task.inspect} lives in this process alone - hand a tree to a job with TaskProgress.handoff"
+      super("key" => key)
+    end
+
+    # The tree at the key, adopted
+    def deserialize(hash) = TaskProgress.adopt(hash.fetch("key"))
+
+    # What it serializes
+    def klass = TaskProgress
+  end
+end

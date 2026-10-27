@@ -28,6 +28,7 @@ class TaskProgress
     # @rbs @said_at: Float
     # @rbs @closed: bool
     # @rbs @thread: Thread?
+    # @rbs @ended: Set[path]
 
     # Writes to `io`: news at most every `interval` seconds, and that it is still going after `heartbeat` seconds of quiet
     #: (?IO | StringIO, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?clock: ^() -> Float) -> void
@@ -43,6 +44,7 @@ class TaskProgress
       @said_at = -Float::INFINITY
       @closed = false
       @thread = nil
+      @ended = Set.new
     end
 
     # Takes one batch, see Log#add_output
@@ -53,12 +55,14 @@ class TaskProgress
         @log = log
         @said_at = @clock.call - @interval if @said_at.infinite? # the first news goes out at once
         snapshot = log.snapshot
-        endings = batch.events.filter_map { it.path if ENDINGS.include?(it.op) }
-        batch.events.each do |event|
+        events = batch.events.map { ending_put(it) || it }
+        endings = events.filter_map { it.path if ENDINGS.include?(it.op) }
+        events.each do |event|
           case event.op
           when *ENDINGS
             # News from inside a task that has ended is old news
             @pending = nil if @pending&.first&.take(event.path.length) == event.path
+            next unless @ended.add?(event.path)
             next if endings.any? { it.length < event.path.length && event.path.take(it.length) == it }
             say(snapshot, ending(snapshot, event))
           when :say then say(snapshot, "#{names(snapshot, event.path)}: #{event.value}")
@@ -124,7 +128,17 @@ class TaskProgress
     end
 
     ENDINGS = %i[done fail cancel].freeze #: Array[Symbol]
-    private_constant :ENDINGS
+    PUT_ENDINGS = {done: :done, failed: :fail, canceled: :cancel}.freeze #: Hash[Symbol, Symbol]
+    private_constant :ENDINGS, :PUT_ENDINGS
+
+    # A squashed batch - from BufferedOutput, a stream, a mount catching up - says a task ended by
+    # putting it whole, finished. Said once, like the ending it stands for
+    #: (Event) -> Event?
+    def ending_put(event)
+      op = PUT_ENDINGS[event.value[:status]] if event.op == :put
+      return unless op && !@ended.include?(event.path)
+      Event.new(path: event.path, op:, value: (op == :fail) ? event.value[:error] : ((op == :cancel) ? event.value[:message] : nil))
+    end
 
     #: (State, Event) -> String
     def ending(snapshot, event)

@@ -13,6 +13,7 @@ class TaskProgress
     :indeterminate, #: bool?
     :unit, #: String?
     :cancelable, #: bool?
+    :attempt, #: Integer?
     :message, #: String?
     :status, #: Symbol
     :error, #: Hash[Symbol, untyped]?

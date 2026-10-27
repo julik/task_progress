@@ -149,6 +149,55 @@ module Scenarios
     end
   end
 
+  # Redis, when one answers - the worker is a process of its own then, and is killed for real
+  def self.redis
+    return @redis if defined?(@redis)
+    @redis = begin
+      require "redis-client"
+      RedisClient.config(url: ENV.fetch("REDIS_URL", "redis://localhost:6379")).new_pool(size: 8).tap { it.call("PING") }
+    rescue LoadError, RedisClient::Error
+      nil
+    end
+  end
+
+  define "handoff", "Handed off, lost, retried",
+    "A job handed off to a worker - a process through Redis, or a thread when there is no Redis - and mounted here from the stream. Halfway the worker is killed: its beat stops, the job goes stale, then fails. A retry adopts it as attempt 2, starts it over, and finishes." do |speed:|
+    nap = napper(speed)
+    stream = redis ? TaskProgress::RedisStream.new(redis) : TaskProgress::MemoryStream.new
+    served = TaskProgress.new("Nightly thumbnails", cancelable: true)
+    job = TaskProgress.handoff("Thumbnail job", stream:, cancelable: true)
+    mount = served.mount("Thumbnail job", cancelable: true).follow_stream(stream, job.key, poll: 0.1, give_up_after: 2.5 / speed)
+    worker = lambda do
+      if redis
+        pid = Process.spawn(RbConfig.ruby, File.expand_path("stream_worker.rb", __dir__), job.key, "--speed", speed.to_s)
+        -> { Process.kill(:KILL, pid) && Process.wait(pid) }.tap { |kill| at_exit { kill.call rescue nil } }
+      else
+        root = TaskProgress.adopt(job.key, stream:, beat: 0.25)
+        thread = Thread.new do
+          root.run do
+            images = root.subtask("Thumbnails", total: 40, cancelable: true)
+            40.times { |i| images.tick!(message: "image-#{format("%02d", i + 1)}.jpg") && nap.(0.1) }
+          end
+        rescue Exception # rubocop:disable Lint/RescueException
+          nil
+        end
+        -> { thread.kill.join && root.log.close } # as good as kill -9: no last word, and no more beats
+      end
+    end
+    background(served) do
+      kill = worker.call
+      nap.(0.05) until mount.task.subtasks.first&.count.to_i >= 15 || mount.finished?
+      kill.call
+      sleep(0.05) until mount.finished?
+      next if mount.task.done? # the worker outran the kill
+      nap.(1.0)
+      worker.call
+      sleep(0.05) until mount.task.done? || mount.task.canceled?
+    ensure
+      served.log.close
+    end
+  end
+
 if TaskProgress::RACTORS
   define "ractors", "Ractors", "Four Ractors each build a tree of their own and send their batches out through a Ractor::Port as frozen copies; each is mounted here. Ruby 4.0 and up." do |speed:|
     Warning[:experimental] = false

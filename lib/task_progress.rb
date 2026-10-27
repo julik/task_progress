@@ -56,6 +56,15 @@ class TaskProgress
   autoload :MemoryStore,        "#{PARTS}/memory_store"
   autoload :CancellationsApp,   "#{PARTS}/cancellations_app"
   autoload :RailsDefaults,      "#{PARTS}/rails_defaults"
+  autoload :MemoryStream,       "#{PARTS}/memory_stream"
+  autoload :RedisStream,        "#{PARTS}/redis_stream"
+  autoload :StreamOutput,       "#{PARTS}/stream_output"
+  autoload :StreamReader,       "#{PARTS}/stream_reader"
+  autoload :Poll,               "#{PARTS}/poll"
+  autoload :Fold,               "#{PARTS}/fold"
+  autoload :RecordingOutput,    "#{PARTS}/recording_output"
+  autoload :Assertions,         "#{PARTS}/assertions"
+  autoload :JobSerializer,      "#{PARTS}/job_serializer"
   autoload :TurboHelper,        "#{PARTS}/turbo_helper"
 
   # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
@@ -64,16 +73,20 @@ class TaskProgress
   RACTORS = RUBY_VERSION.split(".").first.to_i >= 4 #: bool
 
   # Loads every part now rather than on first use - before forking workers, say, so they share
-  # the loaded code. TrackedIO is left out when the progressive_io gem is not there
+  # the loaded code. TrackedIO is left out when the progressive_io gem is not there, and
+  # JobSerializer when ActiveJob is not
   #: () -> singleton(TaskProgress)
   def self.eager_load!
     constants.each do |name|
       const_get(name)
     rescue LoadError
-      raise unless name == :TrackedIO
+      raise unless OPTIONAL.include?(name)
     end
     self
   end
+
+  OPTIONAL = %i[TrackedIO JobSerializer].freeze #: Array[Symbol]
+  private_constant :OPTIONAL
 
   # Raised at whoever works on a task that was called off, so the work stops at its next step.
   # An Exception rather than a StandardError, like Interrupt: a `rescue => e` around one step
@@ -213,7 +226,7 @@ class TaskProgress
 
   # Picks up the requests CancellationsApp leaves in the store, until the root has ended
   #: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
-  def self.watch_cancellations(root, store, key, poll)
+  def self.watch_cancellations(root, store, key, poll) # :nodoc:
     Thread.new do
       Thread.current.report_on_exception = false
       until root.finished?
@@ -229,9 +242,129 @@ class TaskProgress
     end
   end
 
+  @stream = nil #: untyped
+  @stream_lock = Mutex.new #: Thread::Mutex
+
+  # Where `handoff`, `adopt` and `follow` keep trees, unless told otherwise: a MemoryStream for
+  # this process alone, until it is set to something every process can reach
+  #
+  #     TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+  #: () -> untyped
+  def self.stream = @stream || @stream_lock.synchronize { @stream ||= MemoryStream.new }
+
+  # Sets where trees are kept, see `stream`
+  #: (untyped) -> void
+  def self.stream=(stream)
+    @stream = stream
+  end
+
+  # A root to hand to whoever does the work - a job, a worker, another machine - which takes it
+  # up with `adopt`. Until then it waits, as "pending", where anyone can `follow` it: a page can
+  # show the job queued before any worker has picked it up.
+  #
+  #     import = TaskProgress.handoff("Importing", cancelable: true)
+  #     ImportJob.perform_later(upload, import)        # ActiveJob takes the task itself
+  #     Importer.perform_async(upload.id, import.key)  # anything else, its key
+  #
+  # The tree lives in `stream` under `key`. Once it is handed off, leave it to the worker: what
+  # this side writes after the worker has started is ignored
+  #: (String, ?stream: untyped, **untyped) -> TaskProgress
+  def self.handoff(name, stream: self.stream, **attributes)
+    key = StreamOutput.key_for(Log.new.id)
+    new(name, outputs: [StreamOutput.new(stream, key)], log: Log.new(key:), **attributes)
+  end
+
+  # Takes up a tree handed off with `handoff` - by its key, or the task itself - as a root of
+  # its own, with the name and attributes it was handed off with. It starts the tree over: a
+  # second worker to adopt it, a job retried, replaces what the last one wrote.
+  #
+  # Batches go out squashed, every `interval` seconds at most. Every `beat` seconds it tells
+  # whoever follows that it is alive, and takes the cancel requests that came. With a block,
+  # the block is the root's work, see `run`, and it all stops when the block returns. Without
+  # one, call `log.close` once the work is over - ActiveJob does this by itself, see JobSerializer
+  #: (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+  #: [T] (String | TaskProgress, ?stream: untyped, ?beat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  def self.adopt(key, stream: self.stream, beat: 1, interval: 0.1, &block)
+    key = key.key || raise(ArgumentError, "#{key.inspect} was not handed off") if key.is_a?(TaskProgress)
+    handed = StreamReader.new(stream, key).snapshot&.then { State.fold(it.events)[[]] }
+    handed or raise ArgumentError, "Nothing was handed off at #{key}, or it has expired"
+    writer = StreamOutput.new(stream, key, beat:)
+    output = BufferedOutput.new(writer, interval:)
+    log = Log.new(key:)
+    log.on_close do
+      output.close
+      writer.close
+    end
+    root = new(handed.name, outputs: [output], log:, total: handed.total, expect: handed.expect,
+      indeterminate: !!handed.indeterminate, unit: handed.unit, cancelable: !!handed.cancelable, attempt: handed.attempt.to_i + 1)
+    return root unless block
+    begin
+      root.run { block.call(it) }
+    ensure
+      log.close
+    end
+  end
+
+  # A tree that mirrors the one in `stream` at `key`, kept up to date on a thread of its own -
+  # for drawing it anywhere: a terminal, an SSE or polling endpoint, a parent's tree. Requests
+  # to cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and
+  # fails after `give_up_after` seconds of that, see Mount#follow_stream. Call `log.close` to stop
+  # following - SSE and Poll can do it for you when they are done
+  #: (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+  def self.follow(key, stream: self.stream, poll: 1, give_up_after: 60)
+    root, mount = mirror(key)
+    mount.follow_stream(stream, key, poll:, give_up_after:)
+    root
+  end
+
+  # The tree in `stream` at `key` as it is now, read once - for a page, or one poll, that needs
+  # no more than that. See `follow` for one kept up to date
+  #: (String, ?stream: untyped) -> TaskProgress
+  def self.fetch(key, stream: self.stream)
+    root, mount = mirror(key)
+    mount.follow_stream(stream, key, watch: false)
+    root
+  end
+
+  # Runs the block as the work of every root among `arguments` that a worker took up with `adopt`
+  # - done when it returns, failed when it raises - and closes them after. What JobSerializer
+  # wraps every ActiveJob in; for any other job runner, wrap `perform` in it the same way
+  #: [T] (Array[untyped]) { () -> T } -> T?
+  def self.working_on(arguments, &block)
+    roots = arguments.flat_map { it.is_a?(Hash) ? it.values : [it] }
+      .select { it.is_a?(TaskProgress) && it.key && !it.node.sealed } #: Array[TaskProgress]
+    begin
+      within(roots, &block)
+    ensure
+      roots.each { it.log.close }
+    end
+  end
+
+  # The block as the work of each root in turn, the first outermost
+  #: [T] (Array[TaskProgress]) { () -> T } -> T?
+  def self.within(roots, &block)
+    root = roots.first or return block.call
+    root.run { within(roots.drop(1), &block) }
+  end
+  private_class_method :within
+
+  # A root that is a mount and nothing else, named after `key` until the stream says otherwise
+  #: (String) -> [TaskProgress, Mount]
+  def self.mirror(key)
+    log = Log.new(key:)
+    root = new(key, log:)
+    mount = Mount.new(log, [], own: false)
+    log.transaction do |tx|
+      tx.journal.touch([], tx.state[[]])
+      tx.state[[]]&.sealed = mount
+    end
+    [root, mount]
+  end
+  private_class_method :mirror
+
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
   #: (untyped) -> Integer?
-  def self.size_of(collection) = (collection.size if collection.respond_to?(:size))
+  def self.size_of(collection) = (collection.size if collection.respond_to?(:size)) # :nodoc:
 
   # Where the browser client lives: `task_tree.js` (the fold, and `follow` for an SSE stream),
   # `render_queue.js`, `row_view.js`, a Stimulus controller, a React component and
@@ -244,28 +377,55 @@ class TaskProgress
   def self.null(name = "progress") = new(name)
 
   # A new tree, and its root. A block becomes an SummaryOutput - called with `percent:`
-  # and `message:` as the tree changes. See `subtask` for `autofinish`
-  #: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool) ?{ (percent: Integer, message: String?) -> void } -> void
-  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, &summary)
+  # and `message:` as the tree changes. See `subtask` for `autofinish`. `attempt` says which
+  # run of the work this is - from 2 on, it is drawn with the task; `adopt` counts them
+  #: (?String, ?outputs: Array[output], ?log: Log, ?total: Integer?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?autofinish: bool, ?attempt: Integer?) ?{ (percent: Integer, message: String?) -> void } -> void
+  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, attempt: nil, &summary)
     @log = log
     @path = ROOT
     outputs = [*outputs, (SummaryOutput.new { |percent:, message:| summary.call(percent:, message:) } if summary)].compact
     outputs.each { @log.add_output(it) }
     @log.transaction do |tx|
-      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:))
+      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:, attempt:))
       tx.state[[]]&.autofinish = autofinish
     end
   end
 
   # The attributes an `open` carries, without what is at its default
-  #: (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool) -> Hash[Symbol, untyped]
-  def self.attributes(name:, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false)
-    {name: utf8(name), total:, weight:, expect:, indeterminate: (true if indeterminate), unit:, cancelable: (true if cancelable)}.compact
+  #: (name: String, ?total: Integer?, ?weight: (Integer | Float)?, ?expect: Integer?, ?indeterminate: bool, ?unit: String?, ?cancelable: bool, ?attempt: Integer?) -> Hash[Symbol, untyped]
+  def self.attributes(name:, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, attempt: nil) # :nodoc:
+    {name: utf8(name), total:, weight:, expect:, indeterminate: (true if indeterminate), unit:, cancelable: (true if cancelable), attempt:}.compact
   end
 
   # A handle on the task at `path` in `log`, without opening anything
   #: (Log, path) -> TaskProgress
-  def self.handle(log, path) = allocate.tap { it.instance_variable_set(:@log, log); it.instance_variable_set(:@path, path.frozen? ? path : path.dup.freeze) }
+  def self.handle(log, path) = allocate.tap { it.instance_variable_set(:@log, log); it.instance_variable_set(:@path, path.frozen? ? path : path.dup.freeze) } # :nodoc:
+
+  # The stream key a root from `handoff`, `adopt`, `follow` or `fetch` lives under, which is
+  # all it takes to `adopt` or `follow` it from anywhere. Nil for any other task
+  #: () -> String?
+  def key = (@log.key if @path.empty?)
+
+  # The task and everything under it as plain Hashes - its name, status and percent, and its
+  # count, total, message and error where it has them - for a test to compare, or a log line:
+  #
+  #     {name: "Import", status: :done, percent: 100, children: [
+  #       {name: "Rows", status: :failed, percent: 40, count: 4, total: 10, error: "RuntimeError: row 5"}]}
+  #: () -> Hash[Symbol, untyped]
+  def outline = TaskProgress.outline(@log.snapshot, @path)
+
+  # The node at `path` in `state` as an outline, see TaskProgress#outline
+  #: (State, path) -> Hash[Symbol, untyped]
+  def self.outline(state, path) # :nodoc:
+    node = state[path] or raise ArgumentError, "No task at #{path.inspect}"
+    error = node.error
+    {
+      name: node.name, status: node.status, percent: state.percent(path),
+      count: (node.count if node.total || node.count.positive?), total: node.total,
+      message: node.message, error: (error && "#{error[:class]}: #{error[:message]}"),
+      children: state.children(path).map { outline(state, it) }.then { it unless it.empty? }
+    }.compact
+  end
 
   # The task as the tree holds it now - frozen, and safe to read from any thread
   #: () -> Node
@@ -389,7 +549,7 @@ class TaskProgress
     return nil if e.task == self
     raise
   rescue Interrupt => e
-    cancel!(e.message == "Interrupt" ? nil : e.message) # Ctrl-C calls the work off, it does not fail it
+    cancel!(TaskProgress.interrupted_by(e)) # Ctrl-C calls the work off, it does not fail it
     raise
   rescue Exception => e # rubocop:disable Lint/RescueException
     # Once called off, the work unwinding is no failure - an on_cancel that closed the connection
@@ -577,23 +737,35 @@ class TaskProgress
   # mount was ended there, so the root is canceled whether it is cancelable or not
   #: (IO) -> Thread
   def accept_cancel_requests(io)
-    require "json"
     Thread.new do
       Thread.current.report_on_exception = false
-      io.each_line("\n", Wire::TEXT_LIMIT) do |line|
-        request = JSON.parse(line) rescue next
-        next unless request.is_a?(Hash) && (path = request["cancel"]).is_a?(Array) && path.length <= Wire::MAX_DEPTH
-        next unless path.all? { it.is_a?(String) && it.match?(Wire::SEGMENT) }
-        path.empty? ? cancel!(Wire.text(request["reason"])) : request_cancel(path, Wire.text(request["reason"]))
-      rescue ArgumentError
-        nil
-      end
+      io.each_line("\n", Wire::TEXT_LIMIT) { take_cancel_request(it) }
     end
   end
 
+  # Takes one cancel request - a line as `accept_cancel_requests` reads them - and returns what
+  # came of it, see `request_cancel`; nil for a line that is not a request
+  #: (String) -> Symbol?
+  def take_cancel_request(line)
+    require "json"
+    request = JSON.parse(line) rescue return
+    return unless request.is_a?(Hash) && (path = request["cancel"]).is_a?(Array) && path.length <= Wire::MAX_DEPTH
+    return unless path.all? { it.is_a?(String) && it.match?(Wire::SEGMENT) }
+    return request_cancel(path, Wire.text(request["reason"])) unless path.empty?
+    cancel!(Wire.text(request["reason"]))
+    :canceled
+  rescue ArgumentError
+    nil
+  end
+
+  # The reason an Interrupt gives, if it gives one: Ctrl-C raises it saying "Interrupt", and a
+  # SIGINT from outside saying nothing at all
+  #: (Interrupt) -> String?
+  def self.interrupted_by(interrupt) = (interrupt.message unless ["", "Interrupt"].include?(interrupt.message)) # :nodoc:
+
   # Every task called off carries the reason, so each of them can say why it stopped
   #: (Transaction, path, String?) -> void
-  def self.cancel_in(tx, path, reason)
+  def self.cancel_in(tx, path, reason) # :nodoc:
     reason = (utf8(reason.to_s) if reason)
     tx.state.open_under(path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel, value: reason) }
     tx << Event.new(path:, op: :cancel, value: reason)

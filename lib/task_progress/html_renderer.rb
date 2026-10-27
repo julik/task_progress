@@ -42,7 +42,10 @@ class TaskProgress
     # The whole tree in its element - or the subtree at `from`, drawn as a tree of its own
     #: (State, ?path) -> String
     def render(snapshot, from = [])
-      rows = snapshot.each(from).map { |path, node| row(snapshot, path, node, depth: path.length - from.length) }
+      rows = snapshot.rows(from).map do |path, node|
+        depth = path.length - from.length
+        node.is_a?(Fold) ? fold(path, node, depth:) : row(snapshot, path, node, depth:)
+      end
       %(<div id="#{h(@id)}" class="tree" data-task-progress-at="#{@clock.call}">#{rows.join}</div>)
     end
 
@@ -67,6 +70,23 @@ class TaskProgress
       HTML
     end
 
+    # Siblings folded into one row, see State#rows - drawn as a row like any other, so the
+    # columns line up
+    #: (path, Fold, ?depth: Integer) -> String
+    def fold(path, fold, depth: path.length)
+      done = fold.status == :done
+      <<~HTML.delete("\n")
+        <div class="row folded #{done ? "done" : "pending"}" id="#{h(@id)}-#{h(path.join("-"))}" data-path="#{h(path.join("-"))}">
+        <div class="label" style="padding-left: #{depth * 18}px">
+        <span class="icon"><span>#{GLYPHS[done ? :done : :pending]}</span></span><span class="name">#{h(fold.name)}</span><span class="message"></span>
+        </div>
+        <div class="bar"><span style="width: #{done ? 100 : 0}%"></span></div>
+        <span class="cancel-slot"></span>
+        <div class="measure"></div>
+        </div>
+      HTML
+    end
+
     private
 
     #: (String?) -> String
@@ -74,8 +94,8 @@ class TaskProgress
 
     #: (Node) -> String
     def message(node)
-      return node.error&.dig(:message).to_s if node.status == :failed
-      [pace(node), node.message].compact.reject(&:empty?).join(" · ")
+      said = (node.status == :failed) ? node.error&.dig(:message) : [pace(node), node.message].compact.reject(&:empty?).join(" · ")
+      [("attempt #{node.attempt}" if node.attempt.to_i > 1), said].compact.reject(&:empty?).join(" · ")
     end
 
     # The rate over the run so far, and the time left at it
