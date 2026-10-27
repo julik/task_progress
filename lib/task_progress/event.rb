@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
 class TaskProgress
-  # One change to one node. `path` is the node's position in the tree - `[]` is the root,
-  # `[3, 1]` the second child of the root's fourth child. Positions, not names: names repeat,
-  # and they may say more than should leave the process
+  # One change to one node. `path` leads to the node by its ancestors' ids - `[]` is the root,
+  # `["x3k0", "00af"]` a child of the root's child "x3k0". Each id is four random base36
+  # characters, unique among its siblings and never the task's name: names repeat, and they
+  # may say more than should leave the process
   #
   # The ops:
   #   open   {name, total, weight, expect, indeterminate, unit} - a new node

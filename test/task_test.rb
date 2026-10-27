@@ -20,11 +20,19 @@ class TaskTest < Minitest::Test
     refute root.done?
   end
 
+  def test_a_child_id_that_hits_a_sibling_is_drawn_again
+    draws = [5, 5, 36**4 - 1]
+    root = TaskProgress.new("Root", log: TaskProgress::Log.new(random: Object.new.tap { |r| r.define_singleton_method(:rand) { |_| draws.shift } }))
+    assert_equal [["0005"], ["zzzz"]], [root.subtask("A").path, root.subtask("B").path]
+  end
+
   def test_subtasks_know_their_parent_and_path
     root = TaskProgress.new("Root")
     a, b = root.subtask("A"), root.subtask("B")
     a1 = a.subtask("A1")
-    assert_equal [[0], [1], [0, 0]], [a.path, b.path, a1.path]
+    assert_equal [1, 1, 2], [a.path.length, b.path.length, a1.path.length]
+    assert_equal a.path, a1.path[0, 1]
+    assert_equal [a.path, b.path], root.subtasks.map(&:path), "in the order they opened"
     assert_equal root, a.parent
     assert_equal a, a1.parent
     assert_equal root, a1.root

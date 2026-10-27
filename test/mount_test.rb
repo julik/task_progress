@@ -17,12 +17,12 @@ class MountTest < Minitest::Test
     a.tick!(message: "one")
     batches.each { assert_equal :applied, mount << it }
 
-    assert_equal [1], mount.path
+    assert_equal local.subtasks.last.path, mount.path
     engine = mount.task
     assert_equal "Engine", engine.name, "the mount keeps the parent's name"
     assert_equal 3.0, engine.node.weight, "...and its weight"
     remote_a = engine.subtasks.first
-    assert_equal [1, 0], remote_a.path
+    assert_equal [*mount.path, *a.path], remote_a.path
     assert_equal ["A", 1, 2, "one"], [remote_a.name, remote_a.count, remote_a.total, remote_a.message]
     assert_equal child.percent, engine.percent
   end
@@ -186,7 +186,7 @@ class MountTest < Minitest::Test
     batches.each { mount << it }
     bogus = TaskProgress::Batch.new(log: child.log.id, prev: child.log.seq, seq: child.log.seq + 1, at: 0.0, events: [
       TaskProgress::Event.new(path: [], op: :note, value: "fine"),
-      TaskProgress::Event.new(path: [7, 7], op: :set, value: 10)
+      TaskProgress::Event.new(path: ["nope", "nope"], op: :set, value: 10)
     ])
     seq = local.log.seq
     assert_equal :rejected, mount << bogus
@@ -226,10 +226,12 @@ class MountTest < Minitest::Test
     grand_batches.each { middle_mount << it }
     middle_batches.each { top_mount << it }
 
-    leaf = top.log.snapshot[[0, 1, 0]]
+    grand = top_mount.task.subtasks.last
+    leaf = grand.subtasks.first
+    assert_equal [*top_mount.path, middle_mount.path.last, leaf.path.last], leaf.path
     assert_equal "Leaf", leaf.name
     assert_equal 3, leaf.count
-    assert_equal "Grandchild", top.log.snapshot[[0, 1]].name
+    assert_equal "Grandchild", grand.name
   end
 
   def test_a_mount_follows_ndjson_off_an_io

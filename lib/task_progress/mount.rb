@@ -4,8 +4,8 @@ require "rbconfig"
 
 class TaskProgress
   # Grafts a tree that lives elsewhere under one node of this one. The remote root lands on the
-  # mount node itself and its `[1, 4]` on `[*mount, 1, 4]`, so mounting is prefixing, and a
-  # relay through several processes prefixes once per hop.
+  # mount node itself and its `["x3k0"]` on `[*mount, "x3k0"]`, so mounting is prefixing, and
+  # a relay through several processes prefixes once per hop.
   #
   # The mount node is sealed: only its Mount writes under it, so a remote can never touch a
   # node outside its prefix - nor rename or reweigh the mount, which stay the parent's to set.

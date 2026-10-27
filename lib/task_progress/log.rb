@@ -14,9 +14,10 @@ class TaskProgress
   class Log
     attr_reader :id, :seq
 
-    def initialize(id: SecureRandom.alphanumeric(10), clock: -> { Process.clock_gettime(Process::CLOCK_REALTIME) })
+    def initialize(id: SecureRandom.alphanumeric(10), clock: -> { Process.clock_gettime(Process::CLOCK_REALTIME) }, random: Random.new)
       @id = id.to_s
       @clock = clock
+      @random = random
       @lock = Mutex.new
       @delivery = Mutex.new
       @state = State.new
@@ -42,7 +43,7 @@ class TaskProgress
       # log can never part ways
       result = Thread.handle_interrupt(Exception => :never) do
         @lock.synchronize do
-          tx = Transaction.new(@state, @clock.call)
+          tx = Transaction.new(@state, @clock.call, @random)
           self.current = tx
           begin
             value = Thread.handle_interrupt(Exception => :immediate) { yield(tx) }
@@ -104,9 +105,10 @@ class TaskProgress
     class Transaction
       attr_reader :events, :journal, :at, :state
 
-      def initialize(state, at)
+      def initialize(state, at, random)
         @state = state
         @at = at
+        @random = random
         @events = []
         @journal = State::Journal.new
       end
@@ -116,6 +118,8 @@ class TaskProgress
         @events << event
         self
       end
+
+      def new_child(path) = @state.new_child(path, @random)
     end
 
     private

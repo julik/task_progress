@@ -32,14 +32,14 @@ class SSETest < Minitest::Test
     root = TaskProgress.new("job")
     root.subtask("Other")
     upload = root.subtask("Upload")
-    upload.subtask("Part")
+    part = upload.subtask("Part")
     reader = Thread.new { read_frames(TaskProgress::SSE.new(upload)) }
     sleep 0.02
     root.subtasks.first.note("not ours")
     upload.done!
     batches = reader.value.drop(1).map { batch_of(it) }
 
-    assert_equal [[], [0]], batches.first.events.map(&:path)
+    assert_equal [[], part.path.drop(1)], batches.first.events.map(&:path)
     assert_equal [[[], :done]], batches.last.events.map { [it.path, it.op] }
     assert_equal 2, batches.length
     refute root.finished?, "the stream ends with the subtask, not the root"

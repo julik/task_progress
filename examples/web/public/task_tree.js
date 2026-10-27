@@ -52,7 +52,7 @@ export class TaskTree {
 
   get root() { return this.nodes.get("") }
 
-  childrenOf(node) { return node.children.map((ordinal) => this.nodes.get(key([...node.path, ordinal]))) }
+  childrenOf(node) { return node.children.map((id) => this.nodes.get(key([...node.path, id]))) }
 
   // Pre-order, children by position
   *each(node = this.root) {
@@ -114,11 +114,8 @@ export class TaskTree {
   #adopt(path) {
     if (path.length === 0) return
     const parent = this.nodes.get(parentKey(path))
-    const ordinal = path[path.length - 1]
-    if (!parent.children.includes(ordinal)) {
-      parent.children.push(ordinal)
-      parent.children.sort((a, b) => a - b)
-    }
+    const id = path[path.length - 1]
+    if (!parent.children.includes(id)) parent.children.push(id)
   }
 
   #applyOp(path, op, value, at) {

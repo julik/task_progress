@@ -11,12 +11,12 @@ class WireTest < Minitest::Test
 
   def test_a_batch_dumps_to_one_line_and_parses_back
     batch = TaskProgress::Batch.new(log: "abc", prev: 4, seq: 5, at: 1.25, events: [
-      TaskProgress::Event.new(path: [0, 2], op: :set, value: 40),
+      TaskProgress::Event.new(path: ["x3k0", "00af"], op: :set, value: 40),
       TaskProgress::Event.new(path: [], op: :done)
     ])
     json = TaskProgress::Wire.dump(batch)
     refute_includes json, "\n"
-    assert_equal '{"log":"abc","prev":4,"seq":5,"at":1.25,"ops":[[[0,2],"set",40],[[],"done"]]}', json
+    assert_equal '{"log":"abc","prev":4,"seq":5,"at":1.25,"ops":[[["x3k0","00af"],"set",40],[[],"done"]]}', json
     assert_equal batch, TaskProgress::Wire.parse(json)
   end
 
@@ -24,14 +24,16 @@ class WireTest < Minitest::Test
     good = [[[], "note", "fine"]]
     [
       [[[], "explode", 1]],
-      [[["0"], "set", 1]],
-      [[[-1], "set", 1]],
+      [[[0], "set", 1]],
+      [[["X3K0"], "set", 1]],
+      [[["a/b"], "set", 1]],
+      [[["a" * 17], "set", 1]],
       [[[], "set", "50"]],
       [[[], "add", 1.5]],
       [[[], "fail", "not a hash"]],
       [[[], "open", "not a hash"]],
       [[[], "put", {name: "x", status: "exploded"}]],
-      [[[0] * 33, "note", "too deep"]]
+      [[["a"] * 33, "note", "too deep"]]
     ].each do |ops|
       assert_nil TaskProgress::Wire.parse(line(good + ops)), ops.inspect
     end

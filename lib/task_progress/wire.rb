@@ -5,7 +5,7 @@ require "json"
 class TaskProgress
   # A batch as JSON, one object per line:
   #
-  #   {"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[[3,1],"set",40],[[3],"note","Reading"]]}
+  #   {"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0","00af"],"set",40],[["x3k0"],"note","Reading"]]}
   #
   # The reading side is meant for a writer we do not trust - a subprocess parsing hostile input,
   # a stream relayed from elsewhere - so nothing it sends is taken at its word: a batch with
@@ -17,7 +17,7 @@ class TaskProgress
     BACKTRACE_LINES = 200
     CAUSES = 3
     MAX_DEPTH = 32
-    MAX_SEGMENT = 10_000_000
+    SEGMENT = /\A[0-9a-z]{1,16}\z/
     MAX_OPS = 100_000
     MAX_COUNT = 2**53
     STATUSES = %w[pending active done failed].freeze
@@ -94,8 +94,8 @@ class TaskProgress
 
     def path(path)
       return unless path.is_a?(Array) && path.length <= MAX_DEPTH
-      return unless path.all? { it.is_a?(Integer) && it >= 0 && it <= MAX_SEGMENT }
-      path.freeze
+      return unless path.all? { it.is_a?(String) && it.match?(SEGMENT) }
+      path.map { -it }.freeze
     end
 
     def value(op, value)

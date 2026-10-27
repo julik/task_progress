@@ -9,7 +9,8 @@ class BranchTest < Minitest::Test
     root = TaskProgress.new("root", log: ticking_log)
     root.subtask("Elsewhere").update_to(percent: 10)
     upload = root.subtask("Upload", total: 4)
-    upload.subtask("Part").advance!(1)
+    part = upload.subtask("Part")
+    part.advance!(1)
 
     batches, output = recording
     upload.add_output(output)
@@ -17,9 +18,9 @@ class BranchTest < Minitest::Test
     root.subtasks.first.update_to(percent: 20) # not in the branch
     upload.subtasks.first.done!
 
-    assert_equal [[[], :put], [[0], :put]], batches.first.events.map { [it.path, it.op] }
+    assert_equal [[[], :put], [[part.path.last], :put]], batches.first.events.map { [it.path, it.op] }
     assert_equal [[[], :add, 2]], batches[1].events.map { [it.path, it.op, it.value] }
-    assert_equal [[0]], batches[2].events.map(&:path)
+    assert_equal [[part.path.last]], batches[2].events.map(&:path)
     assert_equal 3, batches.length, "a batch outside the branch is left out"
     assert_equal subtree(root.log.snapshot, upload.path), subtree(fold_batches(batches), [])
   end
@@ -37,7 +38,7 @@ class BranchTest < Minitest::Test
 
     assert batches.first.reset?
     batches.each_cons(2) { |a, b| assert_equal a.seq, b.prev }
-    assert_equal ["#{root.log.id}/0"], batches.map(&:log).uniq
+    assert_equal ["#{root.log.id}/#{upload.path.last}"], batches.map(&:log).uniq
   end
 
   def test_a_branch_squashes_the_same_as_it_streams
@@ -69,12 +70,11 @@ class BranchTest < Minitest::Test
     assert_equal 4, mount.task.count
   end
 
-  def test_pruning_an_ancestor_resets_the_branch
+  def test_pruning_an_ancestor_ends_the_branch
     root = TaskProgress.new("root")
     job = root.subtask("Job")
     step = job.subtask("Step")
     step.advance!(3)
-    step.done!
     batches, output = recording
     step.add_output(output)
 
@@ -82,14 +82,19 @@ class BranchTest < Minitest::Test
     assert batches.last.reset?
     assert_empty batches.last.events, "nothing is left to show"
 
-    again = job.subtask("Step again")
-    assert_equal step.path, again.path, "the path is reused"
-    again.note("Starting")
-    state = fold_batches(batches)
-    assert_equal "Step again", state[[]].name
-    assert_equal :active, state[[]].status
-    assert_equal 0, state[[]].count, "nothing carries over from the old task"
-    assert_equal subtree(root.log.snapshot, again.path), subtree(state, [])
+    count = batches.length
+    job.subtask("Step again").note("Starting")
+    assert_equal count, batches.length, "a task opening under the same parent is not ours"
+  end
+
+  def test_an_sse_stream_of_a_pruned_branch_ends
+    root = TaskProgress.new("root")
+    job = root.subtask("Job")
+    step = job.subtask("Step")
+    reader = Thread.new { [].tap { |frames| TaskProgress::SSE.new(step).each { frames << it } } }
+    sleep 0.02
+    root.log.append(TaskProgress::Event.new(path: job.path, op: :prune))
+    assert reader.join(2), "the stream ended"
   end
 
   def test_a_branch_output_is_removed_by_what_was_added

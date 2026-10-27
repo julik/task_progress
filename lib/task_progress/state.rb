@@ -6,6 +6,7 @@ class TaskProgress
   # thread-safe on its own - the Log holds its lock around every apply
   class State
     ATTRIBUTES = %i[name total weight expect indeterminate unit].freeze
+    CHILD_IDS = 36**4 # four base36 characters
     FIELDS = %i[name total count percent weight expect indeterminate unit message status error stale
       opened_at started_at finished_at].freeze
 
@@ -43,9 +44,21 @@ class TaskProgress
 
     def children(path) = @nodes.fetch(path).children.map { [*path, it].freeze }
 
-    def next_child(path) = (@nodes.fetch(path).children.last || -1) + 1
+    # A path for a new child of `path`. A child is named by a random id rather than its position,
+    # so a pruned task's path never turns up again on another one - not after a prune here, nor
+    # when a restarted remote replaces its tree. Ids only have to differ between siblings, since
+    # the path tells cousins apart, and a draw that hits a sibling is drawn again
+    def new_child(path, random)
+      @nodes.fetch(path)
+      100.times do
+        child = [*path, -random.rand(CHILD_IDS).to_s(36).rjust(4, "0")].freeze
+        return child unless @nodes.key?(child)
+      end
+      raise ArgumentError, "No id left for another task under #{path.inspect}"
+    end
 
-    # Pre-order, children by position - the order a renderer wants and the order puts replay in
+    # Pre-order, children in the order they opened - the order a renderer wants and the order
+    # puts replay in, so a reader rebuilding from a squash ends up with the same order
     def each(path = [], &block)
       return enum_for(:each, path) unless block
       node = @nodes[path] or return
@@ -133,8 +146,8 @@ class TaskProgress
       if node.children.any? || missing(node).positive?
         weights = missing(node).to_f
         sum = 0.0
-        node.children.each do |ordinal|
-          child_path = [*path, ordinal]
+        node.children.each do |id|
+          child_path = [*path, id]
           child = @nodes[child_path]
           weights += child.weight
           sum += child.weight * fraction(child_path, child)
@@ -213,10 +226,6 @@ class TaskProgress
       node.weight = node.weight.to_f
     end
 
-    def adopt(parent, path)
-      ordinal = path.last
-      index = parent.children.bsearch_index { it >= ordinal } || parent.children.length
-      parent.children.insert(index, ordinal) unless parent.children[index] == ordinal
-    end
+    def adopt(parent, path) = parent.children << path.last
   end
 end

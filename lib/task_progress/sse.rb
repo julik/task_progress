@@ -46,8 +46,10 @@ class TaskProgress
     private
 
     # Judged by what was sent, never by the snapshot: that runs ahead of delivery, and ending on
-    # it could cut the stream before the batch that finished the root went out
+    # it could cut the stream before the batch that finished the root went out. An empty reset
+    # is a branch whose task was pruned, which will not come back either
     def finishes_root?(batch)
+      return true if batch.reset? && batch.events.empty?
       batch.events.any? do |event|
         event.path.empty? && (event.op == :done || event.op == :fail ||
           (event.op == :put && %i[done failed].include?(event.value[:status])))

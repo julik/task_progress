@@ -108,7 +108,7 @@ class TaskProgress
   def subtask(name, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, &block)
     child = @log.transaction do |tx|
       writable!(tx)
-      path = [*@path, tx.state.next_child(@path)].freeze
+      path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, total:, weight:, expect:, indeterminate:, unit:))
       TaskProgress.handle(@log, path)
     end
@@ -190,7 +190,7 @@ class TaskProgress
   def mount(name, weight: nil)
     path = @log.transaction do |tx|
       writable!(tx)
-      path = [*@path, tx.state.next_child(@path)].freeze
+      path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, weight:))
       tx.state[path].sealed = true
       path

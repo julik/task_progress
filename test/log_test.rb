@@ -180,10 +180,10 @@ class LogTest < Minitest::Test
 
   def test_a_snapshot_is_frozen
     root = TaskProgress.new("root")
-    root.subtask("A")
+    a = root.subtask("A")
     snapshot = root.log.snapshot
     assert snapshot.frozen?
-    assert snapshot[[0]].frozen?
-    assert_raises(FrozenError) { snapshot[[0]].name = "x" }
+    assert snapshot[a.path].frozen?
+    assert_raises(FrozenError) { snapshot[a.path].name = "x" }
   end
 end
