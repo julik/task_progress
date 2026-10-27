@@ -4,7 +4,7 @@
 //
 // A set, add or note only matters for the state it leaves behind, so those collapse into the paths
 // they touched. What a renderer must hear about even when a later batch in the same frame hides it
-// goes into `events`, in order: done and fail (with the error), say lines (the tree never holds
+// goes into `events`, in order: done, fail (with the error) and cancel, say lines (the tree never holds
 // them), and the stream starting over (reset) or breaking off (gap).
 
 const key = (path) => path.join("/")
@@ -15,7 +15,7 @@ export const nextFrame = globalThis.requestAnimationFrame
   : (fn) => setTimeout(fn, 16)
 
 const STRUCTURAL = new Set(["open", "put", "prune"])
-const NOTABLE = new Set(["done", "fail", "say"])
+const NOTABLE = new Set(["done", "fail", "cancel", "say"])
 
 const blankChanges = () => ({ batches: 0, touched: new Set(), events: [], structure: false })
 

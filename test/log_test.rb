@@ -30,7 +30,7 @@ class LogTest < Minitest::Test
           end
         when 9 then task.update_to(percent: 100)
         end
-      rescue ArgumentError, RuntimeError
+      rescue ArgumentError, RuntimeError, TaskProgress::Canceled
         nil
       end
     end

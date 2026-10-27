@@ -9,7 +9,8 @@
 }
 .tree { border-top: 1px solid var(--line); }
 /* Rows have one fixed height: every cell is a single line and the icon sits in a fixed box */
-.row { display: grid; grid-template-columns: minmax(0, 1fr) 140px 110px; gap: 12px; align-items: center; box-sizing: border-box; height: 35px; padding: 0; overflow: hidden; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 20px; }
+/* label | bar | cancel | measure - the cancel column is always there, so every bar lines up */
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 140px 20px 110px; gap: 12px; align-items: center; box-sizing: border-box; height: 35px; padding: 0; overflow: hidden; border-bottom: 1px solid var(--line); font-size: 14px; line-height: 20px; }
 .row .label { display: flex; gap: 8px; align-items: center; min-width: 0; height: 20px; overflow: hidden; }
 .row .name { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .message { flex: 1 1 0; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -19,11 +20,19 @@
 /* Same box for every state, whatever font the glyph falls back to; only the inner .spin rotates */
 .icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; line-height: 14px; font-size: 13px; overflow: hidden; }
 .icon > span { display: block; line-height: 14px; }
+/* Right of the bar, the way a Finder copy shows it. A fixed box, so a row is as tall with the
+   button as without it - and hidden it keeps its place, so nothing after it moves */
+.row button.cancel { all: unset; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 20px; height: 20px; margin-left: -6px; border-radius: 50%; color: var(--muted); cursor: pointer; }
+.row button.cancel:hover, .row button.cancel:focus-visible { color: var(--fail); background: var(--track); }
+.row button.cancel:disabled { cursor: progress; opacity: 0.4; }
+.row button.cancel[hidden] { display: inline-flex; visibility: hidden; }
 .bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--fill); transition: width 0.2s ease-out; }
 .row.failed .bar > span { background: var(--fail); }
+.row.canceled .name { color: var(--muted); }
+.row.canceled .bar > span { background: var(--muted); }
 .bar.indeterminate > span { width: 30% !important; animation: slide 1.1s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 .icon > .spin { box-sizing: border-box; width: 11px; height: 11px; border: 2px solid var(--track); border-top-color: var(--fill); border-radius: 50%; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 560px) { .row { grid-template-columns: minmax(0, 1fr) 80px; } .row .measure { display: none; } }
+@media (max-width: 560px) { .row { grid-template-columns: minmax(0, 1fr) 80px 20px; } .row .measure { display: none; } }

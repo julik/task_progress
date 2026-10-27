@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react"
 import { createRoot } from "react-dom/client"
 import htm from "htm"
-import { followEventSourceAt } from "./task_tree.js"
-import { rowView } from "./row_view.js"
+import { followEventSourceAt, requestCancel } from "./task_tree.js"
+import { rowView, CANCEL_ICON } from "./row_view.js"
 
 const html = htm.bind(React.createElement)
 
@@ -19,7 +19,19 @@ export function useTaskTree(url) {
   return state.tree
 }
 
-function Row({ row }) {
+// A cancel button, right of the bar. It stays pressed until the cancel comes down the stream -
+// the row is then not cancelable any more, and the button hides. Hidden, it keeps its place
+function CancelButton({ row, onCancel }) {
+  const [pressed, setPressed] = useState(false)
+  const press = async () => {
+    setPressed(true)
+    if ((await onCancel(row)) === false) setPressed(false)
+  }
+  return html`<button type="button" className="cancel" hidden=${!(onCancel && row.cancelable)} disabled=${pressed}
+    aria-label=${`Cancel ${row.name}`} onClick=${press} dangerouslySetInnerHTML=${{ __html: CANCEL_ICON }} />`
+}
+
+function Row({ row, onCancel }) {
   return html`
     <div className=${`row ${row.status}${row.stale ? " stale" : ""}`}>
       <div className="label" style=${{ paddingLeft: row.depth * 18 }}>
@@ -28,18 +40,22 @@ function Row({ row }) {
         <span className="message">${row.message}</span>
       </div>
       <div className=${`bar${row.indeterminate ? " indeterminate" : ""}`}><span style=${{ width: `${row.percent}%` }} /></div>
+      <${CancelButton} row=${row} onCancel=${onCancel} />
       <div className="measure">${row.measure}</div>
     </div>`
 }
 
-export function TaskTreeView({ url }) {
+// `cancelUrl` gets a cancelable task's path posted to it when its cancel button is pressed.
+// For anything else, pass `onCancel(row)` - return false from it to release the button
+export function TaskTreeView({ url, cancelUrl, onCancel }) {
   const tree = useTaskTree(url)
   if (!tree) return null
-  return [...tree.each()].map((node) => rowView(tree, node)).map((row) => html`<${Row} key=${row.key} row=${row} />`)
+  const cancel = onCancel ?? (cancelUrl && (async (row) => (await requestCancel(cancelUrl, row.path)).ok))
+  return [...tree.each()].map((node) => rowView(tree, node)).map((row) => html`<${Row} key=${row.key} row=${row} onCancel=${cancel} />`)
 }
 
 // For pages that are not React apps: mount into an element, then point it at streams
 export function mountTaskTree(element) {
   const root = createRoot(element)
-  return { followEventSourceAt: (url) => root.render(html`<${TaskTreeView} url=${url} />`) }
+  return { followEventSourceAt: (url, props = {}) => root.render(html`<${TaskTreeView} url=${url} ...${props} />`) }
 }

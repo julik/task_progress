@@ -13,7 +13,8 @@ require_relative "../scenarios"
 #   GET  /scenarios              what can be started
 #   GET  /jobs                   the jobs started lately, newest first
 #   POST /jobs?scenario=&speed=  starts one
-#   POST /jobs/:id/cancel        raises Interrupt in its thread
+#   POST /jobs/:id/cancel        raises Interrupt in its thread; with ?path= (task ids joined with "/")
+#                                it calls that one task off instead, if it is cancelable
 #   GET  /jobs/:id/events        its tree as SSE; with ?drop_after=N the stream is cut after N
 #                                frames, so the browser has to reconnect and resume
 class BenchApp
@@ -61,7 +62,14 @@ class BenchApp
       json(describe(job), 201)
     in ["POST", %r{\A/jobs/(\w+)/cancel\z}]
       job = find($1) or return json({error: "no such job"}, 404)
-      job.thread.raise(Interrupt, "Cancelled from the bench") if job.thread.alive?
+      if (path = request.params["path"])
+        # Only what the tree offered can be called off - the browser is not trusted to decide
+        task = job.root.find(path) or return json({error: "no such task"}, 404)
+        return json({error: "not cancelable"}, 409) unless task.cancelable?
+        task.cancel!("Canceled from the browser")
+      elsif job.thread.alive?
+        job.thread.raise(Interrupt, "Cancelled from the bench")
+      end
       json(describe(job))
     in ["GET", %r{\A/jobs/(\w+)/events\z}]
       job = find($1) or return [404, {}, ["no such job"]]

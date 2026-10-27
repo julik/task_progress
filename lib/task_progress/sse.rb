@@ -51,8 +51,8 @@ class TaskProgress
     def finishes_root?(batch)
       return true if batch.reset? && batch.events.empty?
       batch.events.any? do |event|
-        event.path.empty? && (event.op == :done || event.op == :fail ||
-          (event.op == :put && %i[done failed].include?(event.value[:status])))
+        event.path.empty? && (%i[done fail cancel].include?(event.op) ||
+          (event.op == :put && %i[done failed canceled].include?(event.value[:status])))
       end
     end
   end

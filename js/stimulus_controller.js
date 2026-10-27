@@ -1,13 +1,16 @@
 import { Controller } from "@hotwired/stimulus"
-import { followEventSourceAt } from "./task_tree.js"
-import { rowView } from "./row_view.js"
+import { followEventSourceAt, requestCancel } from "./task_tree.js"
+import { rowView, CANCEL_ICON } from "./row_view.js"
 
 // Draws the tree from a TaskProgress SSE stream. Point it somewhere with the url value:
 //   <div data-controller="task-tree" data-task-tree-url-value="/jobs/abc/events"></div>
 // Changing the value follows the new stream instead. Draws once a frame at most, and then only
-// the rows the batches in that frame touched. Fires task-tree:render after every draw
+// the rows the batches in that frame touched. Fires task-tree:render after every draw.
+//
+// A cancelable task gets a cancel button. Pressing it fires task-tree:cancel with the task's
+// path, and - unless that is prevented - posts the path to the cancel-url value, if there is one
 export default class extends Controller {
-  static values = { url: String }
+  static values = { url: String, cancelUrl: String }
 
   urlValueChanged(url) {
     this.following?.close()
@@ -41,9 +44,18 @@ export default class extends Controller {
     el.innerHTML = `
       <div class="label"><span class="icon"></span><span class="name"></span><span class="message"></span></div>
       <div class="bar"><span></span></div>
+      <button type="button" class="cancel" hidden>${CANCEL_ICON}</button>
       <div class="measure"></div>`
     el.view = {}
+    el.querySelector(".cancel").addEventListener("click", (event) => this.#cancel(event.currentTarget, el.view))
     return el
+  }
+
+  #cancel(button, row) {
+    const { defaultPrevented } = this.dispatch("cancel", { detail: { path: row.path, name: row.name }, cancelable: true })
+    if (defaultPrevented || !this.cancelUrlValue) return
+    button.disabled = true // until the cancel comes down the stream, or the server says no
+    requestCancel(this.cancelUrlValue, row.path).then((response) => { if (!response.ok) button.disabled = false })
   }
 
   // Writes only what differs from the last draw, so an unchanged row costs no DOM work
@@ -58,6 +70,12 @@ export default class extends Controller {
     set("indeterminate", (on) => { el.querySelector(".bar").classList.toggle("indeterminate", on) })
     set("percent", (percent) => { el.querySelector(".bar span").style.width = `${percent}%` })
     set("measure", (measure) => { el.querySelector(".measure").textContent = measure })
+    set("cancelable", (on) => {
+      const button = el.querySelector(".cancel")
+      button.hidden = !on
+      button.disabled = false
+    })
+    set("name", (name) => { el.querySelector(".cancel").setAttribute("aria-label", `Cancel ${name}`) })
     el.view = row
   }
 }

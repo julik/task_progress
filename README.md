@@ -63,7 +63,9 @@ Finishing, failing and `puts` lines go out every time; notes and counts at most 
 - `subtask(name, total:, weight:, expect:, indeterminate:, unit:)`: with a block, the block is the task's work.
 - `run { }`: done when the block returns, failed with the error when it raises (`Interrupt` included). The error is re-raised.
 - `update_to(percent:, message:)`, `advance!(n)`, `tick!`, `note(message)`, `total=`.
-- `done!`, `fail!(error_or_message, **flags)`.
+- `done!`, `fail!(error_or_message, **flags)`, `cancel!(reason)`. Each ends what is still open under the task too: `done!` with a `done`, `fail!` and `cancel!` with a `cancel` - those tasks did not fail, they were cut short.
+- `subtask(name, cancelable: true)` (and `mount(name, cancelable: true)`) tells whoever draws the tree it may offer to call the task off; the renderers in `js/` then show a cancel button. Taking the request back is the app's: `root.find(path)` gets the task, `cancelable?` says whether to honour it. Canceling a mount terminates its child process; the child's own tasks are never cancelable from the parent, as nothing carries a cancel back to it.
+- Canceling works from any thread. Whoever touches a canceled task next gets a `TaskProgress::Canceled`, which `run` takes as the end of that task's work, so the worker stops at its next tick. Ctrl-C in a `run` block cancels rather than fails.
 - `iterate(collection, name, total:, step:) { |item| }`: a subtask that advances once per item and finishes with the loop. Without a block, an Enumerator.
 - `puts(message)`: a line printed above the tree. The tree does not keep it, so a reader joining later does not see it.
 - A counted task is done once its count reaches its total; pass `autofinish: false` when the total is only a guess. `done!` also finishes every task still open under it.
@@ -104,6 +106,7 @@ import { followEventSourceAt, followBatches, applyBatchTo, TaskTree } from "/tas
 followEventSourceAt("/jobs/42/events", (tree, changes) => draw(tree))  // an SSE stream, drawn once a frame
 const feed = followBatches((tree) => draw(tree))                       // batches from anywhere: feed.push(batch)
 applyBatchTo(batch, tree)                                              // one batch, folded in place
+requestCancel("/jobs/42/cancel", path)                                 // posts path=ids/joined/by/slashes
 ```
 
 The terminal demo is `ruby -Ilib examples/cli_demo.rb`.

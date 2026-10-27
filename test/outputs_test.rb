@@ -35,6 +35,16 @@ class OutputsTest < Minitest::Test
     refute_includes io.string, "\e", "never a terminal control"
   end
 
+  def test_an_execution_log_says_only_the_top_of_what_ended_together
+    io = StringIO.new
+    root = TaskProgress.new("demo", outputs: [TaskProgress::Outputs::ExecutionLog.new(io)])
+    job = root.subtask("Job")
+    3.times { job.subtask("step #{it}") }
+    job.cancel!("Ctrl-C")
+    root.subtask("Other").fail!("nope")
+    assert_equal ["⊘ demo › Job: Ctrl-C", "✗ demo › Other: nope"], io.string.lines.map { it.sub(LINE, "").chomp }
+  end
+
   def test_an_execution_log_says_it_is_still_going
     io = StringIO.new
     log = TaskProgress::Outputs::ExecutionLog.new(io, interval: 0.05, heartbeat: 0.2)

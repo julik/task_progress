@@ -29,7 +29,7 @@ main { padding: 20px 28px; min-width: 0; box-sizing: border-box; width: 100%; ma
 .panes h3, .inspector h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 6px; }
 .panes { min-width: 0; }
 .panes > section { min-width: 0; }
-.panes .row { grid-template-columns: minmax(0, 1fr) 90px 90px; }
+.panes .row { grid-template-columns: minmax(0, 1fr) 90px 20px 90px; }
 .inspector { margin-top: 28px; }
 #stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin: 0 0 12px; }
 #stats div { min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
@@ -47,4 +47,4 @@ main { padding: 20px 28px; min-width: 0; box-sizing: border-box; width: 100%; ma
   .panes { grid-template-columns: 1fr; }
   main { padding: 16px; }
 }
-@media (max-width: 560px) { .panes .row { grid-template-columns: minmax(0, 1fr) 80px; } }
+@media (max-width: 560px) { .panes .row { grid-template-columns: minmax(0, 1fr) 80px 20px; } }

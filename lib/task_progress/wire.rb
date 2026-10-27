@@ -20,7 +20,7 @@ class TaskProgress
     SEGMENT = /\A[0-9a-z]{1,16}\z/
     MAX_OPS = 100_000
     MAX_COUNT = 2**53
-    STATUSES = %w[pending active done failed].freeze
+    STATUSES = %w[pending active done failed canceled].freeze
 
     extend self
 
@@ -107,6 +107,7 @@ class TaskProgress
       when :say then text(value) || :invalid
       when :done, :prune then nil
       when :fail then value.is_a?(Hash) ? error(value) : :invalid
+      when :cancel then value.nil? ? nil : (text(value) || :invalid)
       when :put then node(value)
       end
     end
@@ -120,6 +121,7 @@ class TaskProgress
       attrs[:weight] = value["weight"].to_f.clamp(0.0, 1e9) if value["weight"].is_a?(Numeric)
       attrs[:expect] = count(value["expect"]) if value.key?("expect")
       attrs[:indeterminate] = value["indeterminate"] == true if value.key?("indeterminate")
+      attrs[:cancelable] = value["cancelable"] == true if value.key?("cancelable")
       attrs[:unit] = text(value["unit"])&.slice(0, 16) if value.key?("unit")
       attrs[:stale] = value["stale"] == true if stale && value.key?("stale")
       attrs

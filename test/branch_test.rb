@@ -137,7 +137,7 @@ class BranchTest < Minitest::Test
         when 5 then task.note("n")
         when 6 then rng.rand(4).zero? && root.log.append(TaskProgress::Event.new(path: task.path, op: :prune))
         end
-      rescue ArgumentError
+      rescue ArgumentError, TaskProgress::Canceled
         nil
       end
 

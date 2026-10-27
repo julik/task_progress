@@ -130,6 +130,7 @@ class TaskProgress
         case node.status
         when :done then "✓"
         when :failed then "✗"
+        when :canceled then "⊘"
         when :pending then "·"
         else node.stale ? "?" : SPINNER[@frame % SPINNER.length]
         end

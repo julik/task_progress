@@ -44,8 +44,9 @@ function watch(job) {
   $("cancel").hidden = false
   document.querySelectorAll(".scenario").forEach((b) => b.classList.toggle("current", b.dataset.id === job.scenario))
   const url = streamUrl(job)
+  $("stimulus-tree").dataset.taskTreeCancelUrlValue = `/jobs/${job.id}/cancel`
   $("stimulus-tree").dataset.taskTreeUrlValue = url
-  react.followEventSourceAt(url)
+  react.followEventSourceAt(url, { cancelUrl: `/jobs/${job.id}/cancel` })
   inspector.follow(url)
 }
 

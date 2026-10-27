@@ -9,8 +9,10 @@ class TaskProgress
     #   [ 42%  1m02s] Import › Rows: row 12000
     #   [ 50%  1m10s] ✓ Import › Rows  8.1s
     #   [ 50%  1m11s] ✗ Import › Engine: watermarking failed
+    #   [ 50%  1m12s] ⊘ Import › Publish: Ctrl-C
     #
-    # A task finishing or failing, and a line it `puts`, go out at once and every time. The
+    # A task finishing, failing or being canceled, and a line it `puts`, go out at once and every
+    # time - though of a task and the ones under it ending in one batch, only the task says so. The
     # rest - notes and counts - are only ever the latest news, so it says at most one of those
     # per `interval`, the newest. With nothing to say for `heartbeat` it says it is still
     # going, so a CI runner watching for output does not take a long quiet step for a hang
@@ -35,13 +37,14 @@ class TaskProgress
           @log = log
           @said_at = @clock.call - @interval if @said_at.infinite? # the first news goes out at once
           snapshot = log.snapshot
+          endings = batch.events.filter_map { it.path if ENDINGS.include?(it.op) }
           batch.events.each do |event|
             case event.op
-            when :done, :fail
+            when *ENDINGS
               # News from inside a task that has ended is old news
               @pending = nil if @pending && @pending.first[0, event.path.length] == event.path
-              text = (event.op == :done) ? "✓ #{names(snapshot, event.path)}#{took(snapshot[event.path])}" : "✗ #{names(snapshot, event.path)}: #{event.value&.dig(:message)}"
-              say(snapshot, text)
+              next if endings.any? { it.length < event.path.length && event.path[0, it.length] == it }
+              say(snapshot, ending(snapshot, event))
             when :say then say(snapshot, "#{names(snapshot, event.path)}: #{event.value}")
             when :note then @pending = [event.path, event.value] if event.value
             when :set, :add then @pending = [event.path, nil] unless @pending&.first == event.path
@@ -94,6 +97,17 @@ class TaskProgress
         @io.puts(format("[%3d%% %6s] %s", snapshot.percent, TaskProgress.duration(elapsed), text))
         @io.flush
         @said_at = @clock.call
+      end
+
+      ENDINGS = %i[done fail cancel].freeze
+
+      def ending(snapshot, event)
+        names = names(snapshot, event.path)
+        case event.op
+        when :done then "✓ #{names}#{took(snapshot[event.path])}"
+        when :fail then "✗ #{names}: #{event.value&.dig(:message)}"
+        else "⊘ #{names}#{": #{event.value}" if event.value}"
+        end
       end
 
       def names(snapshot, path) = (0..path.length).filter_map { snapshot[path[0, it]]&.name }.join(" › ")

@@ -5,18 +5,20 @@ class TaskProgress
   # event before it changes anything, so a bad one raises and leaves the state as it was. Not
   # thread-safe on its own - the Log holds its lock around every apply
   class State
-    ATTRIBUTES = %i[name total weight expect indeterminate unit].freeze
+    ATTRIBUTES = %i[name total weight expect indeterminate unit cancelable].freeze
     CHILD_IDS = 36**4 # four base36 characters
-    FIELDS = %i[name total count percent weight expect indeterminate unit message status error stale
+    ENDINGS = {done: :done, fail: :failed, cancel: :canceled}.freeze
+    FIELDS = %i[name total count percent weight expect indeterminate unit cancelable message status error stale
       opened_at started_at finished_at].freeze
 
     Node = Struct.new(*FIELDS, :children, :sealed, :autofinish) do
-      def finished? = status == :done || status == :failed
+      def finished? = status == :done || status == :failed || status == :canceled
 
       def to_h
         FIELDS.to_h { [it, self[it]] }.compact.tap do |h|
           h.delete(:stale) unless stale
           h.delete(:indeterminate) unless indeterminate
+          h.delete(:cancelable) unless cancelable
           h.delete(:weight) if weight == 1.0
         end
       end
@@ -96,12 +98,14 @@ class TaskProgress
         updatable!(path, node)
         start(path, at, journal)
         node.message = value
-      when :done, :fail
+      when :done, :fail, :cancel
         updatable!(path, node)
-        start(path, at, journal)
+        # Calling off what never began does not begin it
+        (op == :cancel) ? journal&.touch(path, node) : start(path, at, journal)
         node.finished_at = at
-        node.status = (op == :done) ? :done : :failed
+        node.status = ENDINGS.fetch(op)
         node.error = value if op == :fail
+        node.message = value if op == :cancel && value
       when :prune
         return self unless node # so a squashed run may carry a prune for a node made within it
         journal&.touch(path, node)
@@ -130,17 +134,31 @@ class TaskProgress
       self
     end
 
+    # The tasks under `path` that have not ended, in pre-order - so reversed, every task comes
+    # before the one it is under. A mounted subtree is left out unless `mounts` - a remote that
+    # has not finished may yet, so a `done` from here would be a guess, but calling it off is not
+    def open_under(path, mounts: false)
+      open = []
+      sealed = nil
+      each(path).drop(1).each do |sub, node|
+        next if sealed && sub[0, sealed.length] == sealed
+        sealed = sub if node.sealed && !mounts
+        open << sub unless node.finished? || sealed == sub
+      end
+      open
+    end
+
     # The state as a list of puts, one per node, in pre-order - or just the subtree at `path`
     def squash(path = []) = each(path).map { |path, node| Event.new(path:, op: :put, value: node.to_h) }
 
-    # Done, and everything under it ended - each task by a `done` or a `fail` of its own.
+    # Done, and everything under it ended - each task by a `done`, `fail` or `cancel` of its own.
     # Children that are all through do not finish their parent, which may have more to do after
-    # them; a failed one does not hold back a parent that went on to finish regardless
+    # them; a failed or canceled one does not hold back a parent that went on to finish regardless
     def complete?(path = [], node = @nodes[path])
       return false unless node&.status == :done
       node.children.all? do |id|
         child = @nodes[[*path, id]]
-        child.status == :failed || complete?([*path, id], child)
+        child.status == :failed || child.status == :canceled || complete?([*path, id], child)
       end
     end
 

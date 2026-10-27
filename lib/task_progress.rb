@@ -21,6 +21,18 @@ require_relative "task_progress/refinements"
 #     root.subtask("Rows", total: rows.size) { |t| rows.each { import(it); t.tick! } }
 #   end
 class TaskProgress
+  # Raised at whoever works on a task that was called off, so the work stops at its next step.
+  # An Exception rather than a StandardError, like Interrupt: a `rescue => e` around one step
+  # should not swallow it and carry on with the next
+  class Canceled < Exception # rubocop:disable Lint/InheritException
+    attr_reader :task
+
+    def initialize(task, name)
+      @task = task
+      super("Task '#{name}' was canceled")
+    end
+  end
+
   attr_reader :log, :path
 
   # A root reporting wherever suits a command-line program: a parent process, when it handed
@@ -95,18 +107,18 @@ class TaskProgress
 
   # A new tree, and its root. A block becomes an Outputs::Summary - called with `percent:`
   # and `message:` as the tree changes. See `subtask` for `autofinish`
-  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, autofinish: true, &summary)
+  def initialize(name = "progress", outputs: [], log: Log.new, total: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, &summary)
     @log = log
     @path = [].freeze
     [*outputs, (Outputs::Summary.new(&summary) if summary)].compact.each { @log.add_output(it) }
     @log.transaction do |tx|
-      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:))
+      tx << Event.new(path: [], op: :open, value: TaskProgress.attributes(name:, total:, expect:, indeterminate:, unit:, cancelable:))
       tx.state[[]].autofinish = autofinish
     end
   end
 
-  def self.attributes(name:, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil)
-    {name: utf8(name), total:, weight:, expect:, indeterminate: (true if indeterminate), unit:}.compact
+  def self.attributes(name:, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false)
+    {name: utf8(name), total:, weight:, expect:, indeterminate: (true if indeterminate), unit:, cancelable: (true if cancelable)}.compact
   end
 
   def self.handle(log, path) = allocate.tap { it.instance_variable_set(:@log, log); it.instance_variable_set(:@path, path.frozen? ? path : path.dup.freeze) }
@@ -133,6 +145,19 @@ class TaskProgress
 
   def failed? = status == :failed
 
+  def canceled? = status == :canceled
+
+  # Whether a reader may offer to call it off, and it has not ended yet
+  def cancelable? = !!node.cancelable && !finished?
+
+  # The task at `path` under this one - an Array of ids, or the ids joined with "/" the way the
+  # browser client keys its rows - or nil
+  def find(path)
+    path = path.split("/") if path.is_a?(String)
+    full = [*@path, *path]
+    TaskProgress.handle(@log, full) if @log.snapshot.key?(full)
+  end
+
   # Ended, by `done!` or `fail!` - whether or not everything under it did
   def finished? = node.finished?
 
@@ -153,12 +178,15 @@ class TaskProgress
   # it runs the block as the child's work, see `run`, and returns the block's value.
   #
   # A counted task is done once its count reaches its total. Give it `autofinish: false` when
-  # the total is a guess, and the work may go past it
-  def subtask(name, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, autofinish: true, &block)
+  # the total is a guess, and the work may go past it.
+  #
+  # `cancelable: true` tells whoever draws the tree that it may offer to call the task off - see
+  # `find` and `cancel!` for taking that request back
+  def subtask(name, total: nil, weight: nil, expect: nil, indeterminate: false, unit: nil, cancelable: false, autofinish: true, &block)
     child = @log.transaction do |tx|
       writable!(tx)
       path = tx.new_child(@path)
-      tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, total:, weight:, expect:, indeterminate:, unit:))
+      tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, total:, weight:, expect:, indeterminate:, unit:, cancelable:))
       tx.state[path].autofinish = autofinish
       TaskProgress.handle(@log, path)
     end
@@ -171,6 +199,14 @@ class TaskProgress
     result = yield self
     done!
     result
+  rescue Canceled => e
+    # This task called off - from another thread, say - stops its own work, and nothing above
+    # it notices. A task further up called off stops the work in between as well
+    return nil if e.task == self
+    raise
+  rescue Interrupt => e
+    cancel!(e.message == "Interrupt" ? nil : e.message) # Ctrl-C calls the work off, it does not fail it
+    raise
   rescue Exception => e # rubocop:disable Lint/RescueException
     fail!(e)
     raise
@@ -228,7 +264,7 @@ class TaskProgress
           pending = 0
         end
       ensure
-        task.advance!(pending) if pending.positive?
+        task.advance!(pending) if pending.positive? && !task.finished?
       end
     end
     block ? enumerator.each(&block) : enumerator
@@ -262,7 +298,7 @@ class TaskProgress
     @log.transaction do |tx|
       next unless writable!(tx, finishing: true)
       tx << Event.new(path: @path, op: :note, value: TaskProgress.utf8(message)) if message
-      still_open(tx.state).reverse_each { tx << Event.new(path: it, op: :done) }
+      tx.state.open_under(@path).reverse_each { tx << Event.new(path: it, op: :done) }
       tx << Event.new(path: @path, op: :done)
     end
     self
@@ -270,11 +306,26 @@ class TaskProgress
 
   # Fails the task with an exception, a message, or nothing. `extra` goes along with the
   # error, booleans and integers only - a reader drops the rest
+  #
+  # What is still open under it is canceled: it did not fail, it was cut short
   def fail!(error = nil, **extra)
     @log.transaction do |tx|
       next unless writable!(tx, finishing: true)
       error = Wire.error_to_h(error || "#{tx.state[@path].name} failed").merge(extra)
+      tx.state.open_under(@path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel) }
       tx << Event.new(path: @path, op: :fail, value: error)
+    end
+    self
+  end
+
+  # Calls the task off, and every task still open under it, each with a `cancel` of its own -
+  # from any thread. Whoever works on one of them next gets a Canceled, which `run` takes as
+  # the end of that task's work. Canceling a finished task does nothing
+  def cancel!(reason = nil)
+    @log.transaction do |tx|
+      next unless writable!(tx, finishing: true)
+      tx.state.open_under(@path, mounts: true).reverse_each { tx << Event.new(path: it, op: :cancel) }
+      tx << Event.new(path: @path, op: :cancel, value: (TaskProgress.utf8(reason.to_s) if reason))
     end
     self
   end
@@ -286,11 +337,11 @@ class TaskProgress
 
   # A child whose subtree is fed from elsewhere - a subprocess, a Ractor, a stream. Only the
   # Mount writes under it, see Mount
-  def mount(name, weight: nil)
+  def mount(name, weight: nil, cancelable: false)
     path = @log.transaction do |tx|
       writable!(tx)
       path = tx.new_child(@path)
-      tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, weight:))
+      tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, weight:, cancelable:))
       tx.state[path].sealed = true
       path
     end
@@ -359,23 +410,15 @@ class TaskProgress
   # a mount from here
   def writable!(tx, finishing: false)
     node = tx.state[@path] or raise ArgumentError, "No task at #{@path.inspect}"
-    raise ArgumentError, "Task '#{node.name}' is mounted from elsewhere - write to it through its Mount" if sealed?(tx.state)
+    # Under a mount only the Mount writes - but the mount's own task is the parent's to end
+    if sealed?(tx.state) && !(finishing && node.sealed && !sealed?(tx.state, above: true))
+      raise ArgumentError, "Task '#{node.name}' is mounted from elsewhere - write to it through its Mount"
+    end
+    raise Canceled.new(self, node.name) if node.status == :canceled && !finishing
     !(finishing && node.finished?)
   end
 
-  # In pre-order, so reversed it gives every task before the one it is under
-  def still_open(state)
-    open = []
-    sealed = nil
-    state.each(@path).drop(1).each do |path, node|
-      next if sealed && path[0, sealed.length] == sealed
-      next sealed = path if node.sealed
-      open << path unless node.finished?
-    end
-    open
-  end
-
-  def sealed?(state) = (0..@path.length).any? { state[@path[0, it]]&.sealed }
+  def sealed?(state, above: false) = (0..(above ? @path.length - 1 : @path.length)).any? { state[@path[0, it]]&.sealed }
 
   def positioned?(io)
     io.pos

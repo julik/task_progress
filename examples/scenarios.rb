@@ -31,17 +31,17 @@ module Scenarios
   def self.napper(speed) = ->(seconds) { sleep(seconds / speed) }
 
   define "import", "Import (passes)", "The demo job: a counted download, worker threads, a task with no measure, an engine in a subprocess mounted under its own node." do |speed:|
-    background(TaskProgress.new("Import catalogue")) { DemoJob.run(it, speed:) }
+    background(TaskProgress.new("Import catalogue", cancelable: true)) { DemoJob.run(it, speed:) }
   end
 
   define "import_fails", "Import (engine fails)", "The same job, but the engine subprocess raises halfway. Its error crosses the pipe, fails the mount and then the job." do |speed:|
-    background(TaskProgress.new("Import catalogue")) { DemoJob.run(it, speed:, fail: true) }
+    background(TaskProgress.new("Import catalogue", cancelable: true)) { DemoJob.run(it, speed:, fail: true) }
   end
 
   define "workers", "16 threads, one tree", "Sixteen threads tick their own counters as fast as they like. Thousands of batches - watch the stream inspector keep up, with no gaps." do |speed:|
     nap = napper(speed)
-    background(TaskProgress.new("Crunch")) do |root|
-      workers = 16.times.map { root.subtask("worker #{it + 1}", total: 300) }
+    background(TaskProgress.new("Crunch", cancelable: true)) do |root|
+      workers = 16.times.map { root.subtask("worker #{it + 1}", total: 300, cancelable: true) }
       workers.map do |worker|
         Thread.new { worker.run { 300.times { |i| worker.tick!(message: "item #{i + 1}") && nap.(rand(0.002..0.02)) } } }
       end.each(&:join)

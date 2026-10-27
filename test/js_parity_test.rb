@@ -35,7 +35,7 @@ class JsParityTest < Minitest::Test
         when 6 then task.note("n")
         when 7 then root.log.append(TaskProgress::Event.new(path: task.path, op: :prune)) && live.select! { root.log.snapshot.key?(it.path) }
         end
-      rescue ArgumentError
+      rescue ArgumentError, TaskProgress::Canceled
         nil
       end
 

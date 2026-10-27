@@ -12,12 +12,14 @@ const key = (path) => path.join("/")
 const parentKey = (path) => key(path.slice(0, -1))
 
 const blankNode = (path, at) => ({
-  path, name: "", total: null, count: 0, percent: 0, weight: 1, expect: null, indeterminate: false,
+  path, name: "", total: null, count: 0, percent: 0, weight: 1, expect: null, indeterminate: false, cancelable: false,
   unit: null, message: null, status: "pending", error: null, stale: false,
   opened_at: at, started_at: null, finished_at: null, children: []
 })
 
-const ATTRIBUTES = ["name", "total", "weight", "expect", "indeterminate", "unit"]
+const FINISHED = new Set(["done", "failed", "canceled"])
+const ENDED_WITHOUT_DONE = new Set(["failed", "canceled"])
+const ATTRIBUTES = ["name", "total", "weight", "expect", "indeterminate", "unit", "cancelable"]
 const FIELDS = [...ATTRIBUTES, "count", "percent", "message", "status", "error", "stale", "opened_at", "started_at", "finished_at"]
 
 export class TaskTree {
@@ -70,7 +72,7 @@ export class TaskTree {
   // Done, and everything under it ended - see TaskProgress::State#complete?
   complete(node) {
     if (node?.status !== "done") return false
-    return this.childrenOf(node).every((child) => child.status === "failed" || this.complete(child))
+    return this.childrenOf(node).every((child) => ENDED_WITHOUT_DONE.has(child.status) || this.complete(child))
   }
 
   fraction(node) {
@@ -147,6 +149,11 @@ export class TaskTree {
         node.status = op === "done" ? "done" : "failed"
         if (op === "fail") node.error = value
         break
+      case "cancel": // calling off what never began does not begin it
+        node.finished_at = at
+        node.status = "canceled"
+        if (value) node.message = value
+        break
       case "prune": {
         if (!node) break
         const prefix = key(path)
@@ -194,11 +201,18 @@ export function followEventSourceAt(url, onChange, options = {}) {
         source.close()
         connect()
       }
-      if (tree.root && (tree.root.status === "done" || tree.root.status === "failed")) source.close()
+      if (tree.root && FINISHED.has(tree.root.status)) source.close()
     })
   }
   connect()
   return { tree, close: () => { source.close(); following.close() } }
+}
+
+// Asks the server to call a task off. The server decides - a task is only ever ended by its own
+// tree - so nothing changes here until the `cancel` comes back down the stream. Posts the task's
+// path as `path`, its ids joined with "/" (see TaskProgress#find)
+export function requestCancel(url, path) {
+  return fetch(url, { method: "POST", body: new URLSearchParams({ path: path.join("/") }) })
 }
 
 export function humanBytes(n) {

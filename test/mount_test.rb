@@ -86,6 +86,17 @@ class MountTest < Minitest::Test
     assert_equal 30, mount.task.subtasks.first.percent
   end
 
+  def test_only_the_mount_itself_may_be_cancelable
+    local = TaskProgress.new("local")
+    mount = local.mount("Engine", cancelable: true)
+    child, batches = remote
+    child.subtask("Remote work", cancelable: true)
+    batches.each { mount << it }
+    mount << child.log.squashed
+    assert mount.task.cancelable?
+    refute mount.task.subtasks.first.cancelable?, "nothing would carry a cancel back to the remote"
+  end
+
   def test_a_remote_trees_times_move_onto_our_clock
     remote_time = 1_000.0
     child = TaskProgress.new("child", log: TaskProgress::Log.new(clock: -> { remote_time }))

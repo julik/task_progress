@@ -73,6 +73,42 @@ class CrossProcessTest < Minitest::Test
     assert_equal [:done, :done], [mount.task.status, mount.task.subtasks.first.status]
   end
 
+  def test_canceling_a_task_above_a_mount_cancels_it_and_terminates_the_child
+    root = TaskProgress.new("local")
+    mount = root.mount("Engine")
+    worker = Thread.new do
+      spawn_child(mount, <<~RUBY)
+        TaskProgress.cli("child") { |r| r.subtask("Forever") { |t| loop { t.note("tick") && sleep(0.02) } } }
+      RUBY
+    end
+    sleep 0.05 until mount.task.subtasks.any?
+    root.cancel!("Not needed")
+    status = worker.value
+    assert status.signaled?, "the child was terminated"
+    assert_equal [:canceled, :canceled, :canceled], [root, mount.task, mount.task.subtasks.first].map(&:status)
+  end
+
+  def test_canceling_the_mounts_own_task_terminates_the_child
+    root = TaskProgress.new("local")
+    mount = root.mount("Engine", cancelable: true)
+    worker = Thread.new do
+      spawn_child(mount, 'TaskProgress.cli("child") { |r| r.subtask("Forever") { |t| loop { t.note("tick") && sleep(0.02) } } }')
+    end
+    sleep 0.05 until mount.task.subtasks.any?
+    root.find(mount.path).cancel!("From the browser")
+    assert worker.value.signaled?
+    assert_equal [:canceled, :canceled], [mount.task.status, mount.task.subtasks.first.status]
+    assert_raises(ArgumentError, "under it is still the Mount's") { mount.task.subtasks.first.note("x") }
+    refute mount.task.node.stale, "what the child sent on its way out is not taken for a gap"
+  end
+
+  def test_a_child_that_finishes_by_itself_is_never_signaled
+    mount = TaskProgress.new("local").mount("Engine")
+    status = spawn_child(mount, 'TaskProgress.cli("child") { |r| r.cancel!("Changed my mind") }')
+    assert status.success?
+    assert_equal :canceled, mount.task.status
+  end
+
   def test_interrupting_the_parent_terminates_the_child
     mount = TaskProgress.new("local").mount("Engine")
     pid_file = File.join(Dir.tmpdir, "task_progress_child_#{Process.pid}.pid")
@@ -90,8 +126,7 @@ class CrossProcessTest < Minitest::Test
     parent.raise(Interrupt)
     assert_equal :interrupted, parent.value
     assert_raises(Errno::ESRCH) { Process.kill(0, child) }
-    assert_equal :failed, mount.task.status
-    assert_equal "Interrupt", mount.task.error[:class]
+    assert_equal :canceled, mount.task.status, "an interrupt calls the work off"
   ensure
     File.delete(pid_file) if pid_file && File.exist?(pid_file)
   end

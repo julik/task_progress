@@ -1,6 +1,10 @@
 import { humanBytes } from "./task_tree.js"
 
-const GLYPHS = { done: "✓", failed: "✗", pending: "·" }
+const GLYPHS = { done: "✓", failed: "✗", canceled: "⊘", pending: "·" }
+const FINISHED = new Set(["done", "failed", "canceled"])
+
+// A circle with a cross in it, drawn in the row's text color - the same in every font
+export const CANCEL_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
 
 // What one row shows, worked out once for both demos
 export function rowView(tree, node) {
@@ -17,7 +21,8 @@ export function rowView(tree, node) {
   const glyph = GLYPHS[node.status]
   const icon = glyph ? `<span>${glyph}</span>` : '<span class="spin"></span>'
   return {
-    key: node.path.join("/"), depth: node.path.length, name: node.name, status: node.status, stale: node.stale,
+    key: node.path.join("/"), path: node.path, depth: node.path.length, name: node.name, status: node.status, stale: node.stale,
+    cancelable: !!node.cancelable && !FINISHED.has(node.status),
     percent, indeterminate, measure, icon,
     message: node.status === "failed" ? node.error?.message ?? "" : [pace(tree, node), node.message].filter(Boolean).join(" · ")
   }

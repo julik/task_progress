@@ -268,11 +268,73 @@ class TaskTest < Minitest::Test
     assert_equal "Something went wrong", broken.error[:message]
   end
 
-  def test_the_block_form_fails_on_interrupt_too
+  def test_the_block_form_cancels_on_interrupt
     root = TaskProgress.new("Root")
     assert_raises(Interrupt) { root.subtask("Interrupted") { raise Interrupt } }
-    assert_equal :failed, root.subtasks.first.status
-    assert_equal "Interrupt", root.subtasks.first.error[:class]
+    assert_equal :canceled, root.subtasks.first.status
+    assert_raises(Interrupt) { root.subtask("Stopped") { raise Interrupt, "Cancelled from the bench" } }
+    assert_equal "Cancelled from the bench", root.subtasks.last.message
+  end
+
+  def test_cancel_calls_off_the_task_and_everything_open_under_it
+    batches, output = recording
+    root = TaskProgress.new("Root", outputs: [output])
+    job = root.subtask("Job")
+    started = job.subtask("Started")
+    started.note("going")
+    never = job.subtask("Never started")
+    finished = job.subtask("Finished").done!
+    job.cancel!("Not needed after all")
+
+    assert_equal [[never.path, :cancel], [started.path, :cancel], [job.path, :cancel]], batches.last.events.map { [it.path, it.op] }
+    assert_equal [:canceled, :canceled, :canceled, :done], [job, started, never, finished].map(&:status)
+    assert_nil never.node.started_at, "calling off what never began does not begin it"
+    assert_equal "Not needed after all", job.message
+    assert job.finished?
+    refute job.done?
+    job.cancel!
+    job.done!
+    assert_equal :canceled, job.status, "ending an ended task does nothing"
+    root.done!
+    assert root.done?, "a canceled child does not hold back a parent that finished regardless"
+  end
+
+  def test_a_task_says_whether_it_may_be_called_off
+    root = TaskProgress.new("Root")
+    rows = root.subtask("Rows", cancelable: true)
+    plain = root.subtask("Plain")
+    assert rows.cancelable?
+    refute plain.cancelable?
+    assert_equal true, root.log.squashed.events.find { it.path == rows.path }.value[:cancelable], "it goes on the wire"
+    refute root.log.squashed.events.find { it.path == plain.path }.value.key?(:cancelable)
+    assert_equal rows, root.find(rows.path.join("/"))
+    assert_equal rows, root.find(rows.path)
+    assert_nil root.find("nope")
+    rows.cancel!
+    refute rows.cancelable?, "not once it has ended"
+  end
+
+  def test_a_canceled_task_stops_whoever_works_on_it
+    root = TaskProgress.new("Root")
+    reached = 0
+    worker = Thread.new do
+      root.subtask("Rows", total: 1000) do |rows|
+        1000.times { sleep 0.001; rows.tick! && reached += 1 }
+      end
+      :carried_on
+    end
+    sleep 0.05
+    root.subtasks.first.cancel!
+    assert_equal :carried_on, worker.value, "run takes its own task being called off as the end of its work"
+    assert_operator reached, :<, 1000
+    assert_raises(TaskProgress::Canceled) { root.subtasks.first.tick! }
+  end
+
+  def test_failing_cancels_what_is_still_open_under_it
+    root = TaskProgress.new("Root")
+    pending = root.subtask("Pending")
+    assert_raises(RuntimeError) { root.run { raise "boom" } }
+    assert_equal [:failed, :canceled], [root.status, pending.status]
   end
 
   def test_nested_failures_fail_each_level

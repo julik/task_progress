@@ -14,6 +14,7 @@ class TaskProgress
   #   note   a message
   #   done   nil
   #   fail   an error hash, see Wire.error_to_h
+  #   cancel a reason, or nil - the work was called off, and did not fail
   #   prune  nil - drop every descendant of the node
   #   put    a whole node, see State::Node#to_h - what a squashed log is made of
   #   say    a line to print, which changes nothing in the tree - so a squash drops it, the
@@ -24,7 +25,7 @@ class TaskProgress
     end
   end
 
-  OPS = %i[open meta set add note done fail prune put say].freeze
+  OPS = %i[open meta set add note done fail cancel prune put say].freeze
 
   # The unit of commit: everything one transaction changed, in order. `seq` counts batches,
   # not events, and `prev` names the batch it follows - so a reader that sees a `prev` other

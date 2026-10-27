@@ -53,14 +53,28 @@ class BenchAppTest < Minitest::Test
     assert_match(/Simulated failure/, root.error[:message])
   end
 
-  def test_cancel_fails_the_job_with_an_interrupt
+  def test_cancel_cancels_the_job
     job = start("waiting", speed: 1)
     sleep 0.2
     assert_equal 200, @request.post("/jobs/#{job["id"]}/cancel").status
     batches(job["events"])
     root = @app.jobs.find { it.id == job["id"] }.root
-    assert_equal :failed, root.status
-    assert_equal "Interrupt", root.error[:class]
+    assert_equal :canceled, root.status
+    assert_equal "Cancelled from the bench", root.message
+  end
+
+  def test_a_cancelable_task_is_called_off_by_its_path
+    job = start("workers", speed: 0.5)
+    root = @app.jobs.find { it.id == job["id"] }.root
+    sleep 0.01 until (worker = root.subtasks.first)
+    assert_equal 404, @request.post("/jobs/#{job["id"]}/cancel?path=nope").status
+    assert_equal 200, @request.post("/jobs/#{job["id"]}/cancel?path=#{worker.path.join("/")}").status
+    assert_equal :canceled, worker.status
+    assert_equal "Canceled from the browser", worker.message
+    assert_equal 409, @request.post("/jobs/#{job["id"]}/cancel?path=#{worker.path.join("/")}").status, "not twice"
+    @request.post("/jobs/#{job["id"]}/cancel?path=")
+    batches(job["events"])
+    assert_equal :canceled, root.status
   end
 
   def test_a_cut_stream_stops_after_so_many_frames

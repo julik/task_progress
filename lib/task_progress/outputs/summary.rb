@@ -18,6 +18,7 @@ class TaskProgress
           when :note, :say then message = event.value if event.value
           when :done then message = "#{snapshot[event.path]&.name} complete"
           when :fail then message = "#{snapshot[event.path]&.name} failed"
+          when :cancel then message = "#{snapshot[event.path]&.name} canceled"
           end
         end
         percent = snapshot.percent
