@@ -68,6 +68,12 @@ class BenchAppTest < Minitest::Test
     assert_equal 10, batches("#{job["events"]}?drop_after=10").length
   end
 
+  def test_jobs_list_newest_first_by_the_order_they_started
+    ids = 3.times.map { start("deep")["id"] }
+    listed = JSON.parse(@request.get("/jobs").body).map { it["id"] }
+    assert_equal ids.reverse, listed.first(3)
+  end
+
   def test_listings_and_unknowns
     assert_equal Scenarios::ALL.map(&:id), JSON.parse(@request.get("/scenarios").body).map { it["id"] }
     job = start("deep")

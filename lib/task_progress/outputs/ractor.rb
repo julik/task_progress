@@ -4,7 +4,7 @@ class TaskProgress
   # Ractors on Ruby 3.4 corrupt the VM's table of call sites: a `super` from Ruby into a C
   # constructor (Data#initialize, say) while Ractors run brings the process down, sometimes
   # minutes later and in unrelated code. Ruby 4.0 has it fixed, and the Ractor::Port API with it
-  RACTORS = Gem::Version.new(RUBY_VERSION) >= Gem::Version.new("4.0")
+  RACTORS = RUBY_VERSION.split(".").first.to_i >= 4
 
   module Outputs
     # Sends each batch to a Ractor::Port, as a deep frozen copy - for a tree built inside a

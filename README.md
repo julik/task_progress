@@ -30,6 +30,7 @@ On a terminal it redraws the tree in place. Piped, it prints one line per messag
 - `update_to(percent:, message:)`, `advance!(n)`, `tick!`, `note(message)`, `total=`.
 - `done!`, `fail!(error_or_message, **flags)`.
 - `transaction { }`: everything in the block lands as one batch, or nothing does.
+- `track_io(io, total:, step:) { |io| }`: reading the IO advances the task by bytes. This works for `read`, line reads, `readpartial` and so `IO.copy_stream`, and seeks back do not count twice. The task moves in steps of 0.1% of the total, not once per read. It needs the optional `progressive_io` gem, and an IO with a position. For a pipe or a socket, call `advance!(chunk.bytesize)` instead.
 
 A task reads 100% only once it and everything under it is done. Create a task's subtasks up front (or pass `expect:`) so its bar never jumps back when a new one opens.
 

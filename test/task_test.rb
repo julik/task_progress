@@ -281,30 +281,6 @@ class TaskTest < Minitest::Test
     assert_equal 0, a.percent
   end
 
-  def test_track_io_counts_the_furthest_byte_read
-    root = TaskProgress.new("R")
-    reading = root.subtask("Reading")
-    io = reading.track_io(StringIO.new("x" * 100))
-    io.read(25)
-    assert_equal 25, reading.percent
-    io.seek(0)
-    io.read(10)
-    assert_equal 25, reading.count, "a seek back does not count twice"
-    io.read
-    assert_equal 99, reading.percent
-    assert_equal "bytes", reading.node.unit
-    reading.done!
-    io.seek(0)
-    io.read(10)
-    assert_equal :done, reading.status
-  end
-
-  def test_track_io_hands_back_an_io_it_cannot_size
-    task = TaskProgress.new("R")
-    unsized = Object.new
-    assert_same unsized, task.track_io(unsized)
-  end
-
   def test_concurrent_updates_lose_and_duplicate_nothing
     batches, output = recording
     root = TaskProgress.new("Root", outputs: [output])

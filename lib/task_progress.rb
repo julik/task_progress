@@ -191,19 +191,19 @@ class TaskProgress
     Mount.new(@log, path)
   end
 
-  # Wraps an IO so that reading it advances this task by the bytes read. Readers seek (ZipKit
-  # reads the end of the archive first), so only the furthest position counts
-  def track_io(io)
-    size = io.respond_to?(:size) ? io.size : nil
-    return io unless size&.positive?
-    require "progressive_io"
-    meta(total: size, unit: "bytes")
-    furthest = 0
-    ProgressiveIO.new(io) do |pos|
-      next if pos <= furthest
-      advance!(pos - furthest) unless finished?
-      furthest = pos
-    end
+  # Wraps an IO so that reading it advances this task by the bytes read, see TrackedIO. The total
+  # is the IO's size unless given; with neither, the task counts bytes with no measure. With a
+  # block, the block runs with the wrapped IO as this task's work, see `run`. Needs the
+  # progressive_io gem, and an IO that can tell its position - for a pipe or a socket, call
+  # `advance!` with each chunk instead
+  def track_io(io, total: nil, step: nil)
+    require_relative "task_progress/tracked_io"
+    raise ArgumentError, "#{io.class} cannot tell its position, so reading it cannot be tracked - call advance! with each chunk instead" unless positioned?(io)
+    total ||= io.size if io.respond_to?(:size)
+    meta(total:, unit: "bytes", indeterminate: total.nil?)
+    tracked = TrackedIO.new(io, self, total:, step:)
+    return tracked unless block_given?
+    run { yield(tracked).tap { tracked.flush_progress } }
   end
 
   def ==(other) = other.is_a?(TaskProgress) && other.log.equal?(@log) && other.path == @path
@@ -251,4 +251,11 @@ class TaskProgress
   end
 
   def sealed?(state) = (0..@path.length).any? { state[@path[0, it]]&.sealed }
+
+  def positioned?(io)
+    io.pos
+    true
+  rescue NoMethodError, Errno::ESPIPE, IOError
+    false
+  end
 end

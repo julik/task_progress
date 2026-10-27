@@ -19,10 +19,12 @@ class BenchApp
   KEEP = 30
   ASSETS = %w[/index.html /bench.js /bench.css /style.css /task_tree.js /row_view.js /stimulus_controller.js /react_task_tree.js]
 
-  Job = Data.define(:id, :scenario, :root, :thread, :started_at)
+  # `number` counts jobs as they start - the order to list and evict them in, wall clock or not
+  Job = Data.define(:id, :number, :scenario, :root, :thread)
 
   def initialize
     @jobs = {}
+    @started = 0
     @lock = Mutex.new
     @static = Rack::Static.new(method(:route), urls: ASSETS, root: PUBLIC, header_rules: [[:all, {"cache-control" => "no-store"}]])
   end
@@ -40,15 +42,16 @@ class BenchApp
     in ["GET", "/scenarios"]
       json(Scenarios::ALL.map { {id: it.id, title: it.title, description: it.description} })
     in ["GET", "/jobs"]
-      json(jobs.sort_by(&:started_at).reverse.map { describe(it) })
+      json(jobs.sort_by(&:number).reverse.map { describe(it) })
     in ["POST", "/jobs"]
       scenario = Scenarios.find(request.params["scenario"].to_s) or return json({error: "no such scenario"}, 404)
       speed = Float(request.params.fetch("speed", "1"), exception: false)&.clamp(0.1, 100) || 1.0
       root, thread = scenario.start.call(speed:)
-      job = Job.new(id: root.log.id, scenario: scenario.id, root:, thread:, started_at: Time.now)
-      @lock.synchronize do
-        @jobs[job.id] = job
-        @jobs.delete(@jobs.values.min_by(&:started_at).id) while @jobs.size > KEEP
+      job = @lock.synchronize do
+        Job.new(id: root.log.id, number: @started += 1, scenario: scenario.id, root:, thread:).tap do |job|
+          @jobs[job.id] = job
+          @jobs.delete(@jobs.values.min_by(&:number).id) while @jobs.size > KEEP
+        end
       end
       json(describe(job), 201)
     in ["POST", %r{\A/jobs/(\w+)/cancel\z}]
@@ -71,7 +74,7 @@ class BenchApp
   def describe(job)
     root = job.root
     {id: job.id, scenario: job.scenario, events: "/jobs/#{job.id}/events", status: root.status,
-     percent: root.percent, started_at: job.started_at.to_f}
+     percent: root.percent, number: job.number}
   end
 
   def json(data, status = 200) = [status, {"content-type" => "application/json"}, [JSON.generate(data)]]
