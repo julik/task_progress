@@ -3,8 +3,10 @@ import TaskTreeController from "/task_progress/stimulus_controller.js"
 import { mountTaskTree } from "/task_progress/react_task_tree.js"
 import { TaskTree } from "/task_progress/task_tree.js"
 import { nextFrame } from "/task_progress/render_queue.js"
+import { LocalTasks } from "/task_progress/local_tasks.js"
 
-Application.start().register("task-tree", TaskTreeController)
+const application = Application.start()
+application.register("task-tree", TaskTreeController)
 const react = mountTaskTree(document.getElementById("react-tree"))
 const $ = (id) => document.getElementById(id)
 
@@ -42,14 +44,41 @@ function watch(job) {
   $("job-title").textContent = scenario?.title ?? job.scenario
   $("job-meta").textContent = `job ${job.id} · ${streamUrl(job)}`
   $("cancel").hidden = false
+  $("graft").hidden = false
   document.querySelectorAll(".scenario").forEach((b) => b.classList.toggle("current", b.dataset.id === job.scenario))
   const url = streamUrl(job)
   // The token is what lets this page cancel tasks in this job - the server issued it with the job
   $("stimulus-tree").dataset.taskTreeCancelUrlValue = job.cancellations
   $("stimulus-tree").dataset.taskTreeCancelTokenValue = job.cancel_token
   $("stimulus-tree").dataset.taskTreeUrlValue = url
-  react.followEventSourceAt(url, { cancelUrl: job.cancellations, cancelToken: job.cancel_token })
+  reactProps = { cancelUrl: job.cancellations, cancelToken: job.cancel_token, grafts: [] }
+  react.followEventSourceAt(url, reactProps)
   inspector.follow(url)
+}
+
+let reactProps = {}
+
+// Pretend work in this browser - hashing three files - grafted under the job's root in both
+// panes. Only this page sees it, and the job does not read 100% until it is through, however
+// soon the server is done. Cancel a file, the lot, or the job: each ends it here
+$("graft").addEventListener("click", () => {
+  const work = new LocalTasks("Hash files in this browser", { cancelable: true, weight: 2 })
+  application.getControllerForElementAndIdentifier($("stimulus-tree"), "task-tree").graft([], work)
+  reactProps = { ...reactProps, grafts: [...reactProps.grafts, { path: [], local: work }] }
+  react.followEventSourceAt(streamUrl(current), reactProps)
+  hashFiles(work, [["photos.zip", 24], ["video.mp4", 40], ["notes.txt", 6]])
+})
+
+async function hashFiles(work, files) {
+  const speed = Number($("speed").value)
+  const tasks = files.map(([name, megabytes]) => [work.root.subtask(name, { total: megabytes * 1024 * 1024, unit: "bytes", cancelable: true }), megabytes])
+  for (const [task, megabytes] of tasks) {
+    for (let mb = 0; mb < megabytes && !task.finished; mb++) {
+      await new Promise((resolve) => setTimeout(resolve, 80 / speed))
+      task.advance(1024 * 1024, { message: `chunk ${mb + 1} of ${megabytes}` })
+    }
+  }
+  work.root.done()
 }
 
 $("cancel").addEventListener("click", async () => {

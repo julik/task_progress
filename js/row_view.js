@@ -18,11 +18,15 @@ export function rowView(tree, node) {
   } else if (indeterminate) {
     measure = elapsed(tree, node)
   }
+  // A task called done with something still running under it - browser work grafted to it, say -
+  // is not through, and is drawn as running until it is
+  const status = node.status === "done" && !tree.complete(node) ? "active" : node.status
   // Every state is one inner span, so the .icon box around it never changes; the spinner is drawn in CSS
-  const glyph = GLYPHS[node.status]
+  const glyph = GLYPHS[status]
   const icon = glyph ? `<span>${glyph}</span>` : '<span class="spin"></span>'
   return {
-    key: pathKey(node.path), path: node.path, depth: node.path.length, name: node.name, status: node.status, stale: node.stale,
+    key: pathKey(node.path), path: node.path, depth: node.path.length, name: node.name, status, stale: node.stale,
+    local: node.path.some((id) => String(id).startsWith("_")), // runs in this browser, see LocalTasks
     cancelable: !!node.cancelable && !FINISHED.has(node.status),
     percent, indeterminate, measure, icon,
     message: node.status === "failed" ? node.error?.message ?? "" : [pace(tree, node), node.message].filter(Boolean).join(" · ")

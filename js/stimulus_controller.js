@@ -9,18 +9,32 @@ import { rowView, CANCEL_ICON } from "./row_view.js"
 //
 // A cancelable task gets a cancel button. Pressing it fires task-tree:cancel with the task's
 // path, and - unless that is prevented - creates a cancellation at the cancel-url value, if there
-// is one, signed with the cancel-token value
+// is one, signed with the cancel-token value. A task running in this browser is canceled here.
+//
+// `graft(path, localTasks)` draws tasks running in this browser under a server task, until the
+// url value changes - see TaskTree#graft. Reach the controller with
+// application.getControllerForElementAndIdentifier(element, "task-tree")
 export default class extends Controller {
   static values = { url: String, cancelUrl: String, cancelToken: String }
 
   urlValueChanged(url) {
-    this.following?.close()
+    this.#stop()
     this.rows = new Map()
     this.element.replaceChildren()
     if (url) this.following = followEventSourceAt(url, (tree, changes) => this.render(tree, changes))
   }
 
-  disconnect() { this.following?.close() }
+  disconnect() { this.#stop() }
+
+  graft(path, local) {
+    if (this.following) this.ungrafts.push(this.following.tree.graft(path, local))
+  }
+
+  #stop() {
+    for (const ungraft of this.ungrafts ?? []) ungraft()
+    this.ungrafts = []
+    this.following?.close()
+  }
 
   render(tree, changes) {
     if (changes.structure) {
@@ -54,7 +68,9 @@ export default class extends Controller {
 
   #cancel(button, row) {
     const { defaultPrevented } = this.dispatch("cancel", { detail: { path: row.path, name: row.name }, cancelable: true })
-    if (defaultPrevented || !this.cancelUrlValue) return
+    if (defaultPrevented) return
+    if (row.local) return this.following?.tree.cancelLocal(row.path, "Canceled in this browser")
+    if (!this.cancelUrlValue) return
     button.disabled = true // until the cancel comes down the stream, or the server says no
     requestCancel(this.cancelUrlValue, row.path, { token: this.cancelTokenValue })
       .then((response) => { if (!response.ok) button.disabled = false }, () => { button.disabled = false })

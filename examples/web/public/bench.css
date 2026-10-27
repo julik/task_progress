@@ -48,3 +48,4 @@ main { padding: 20px 28px; min-width: 0; box-sizing: border-box; width: 100%; ma
   main { padding: 16px; }
 }
 @media (max-width: 560px) { .panes .row { grid-template-columns: minmax(0, 1fr) 80px 20px; } }
+.job-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }

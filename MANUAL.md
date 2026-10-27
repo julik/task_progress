@@ -437,9 +437,70 @@ A stream can carry thousands of batches a second. Every batch is still folded as
 
 `RenderQueue` in `render_queue.js` does this; pass `{ schedule }` for a clock other than `requestAnimationFrame`.
 
+### Tasks that run in the browser
+
+Some work happens in the browser - hashing files before an upload, encoding a video. `LocalTasks` writes tasks there the way the server writes its own, and `graft` draws them under a server task:
+
+```js
+import { LocalTasks } from "/task_progress/local_tasks.js"
+
+const work = new LocalTasks("Hash files", { cancelable: true, weight: 2 })
+const ungraft = tree.graft(uploadTask.path, work)           // or the Stimulus controller's graft(path, work)
+const file = work.root.subtask("video.mp4", { total: blob.size, unit: "bytes", cancelable: true })
+file.advance(chunk.byteLength)                               // done at its total
+work.root.done()
+```
+
+A task does not stop your work by itself - whether a cancel does is yours to wire, or not. `task.signal` is an `AbortSignal` that aborts with the reason once the task is canceled, for whatever you choose to hand it to; `onCancel(handler)` calls you instead; and `canceled` is there for a loop to check:
+
+```js
+const response = await fetch(url, { signal: file.signal })  // a cancel aborts the fetch
+file.onCancel((reason) => worker.terminate())                 // or does whatever you say
+```
+
+The rules are the server's: a counted task is done at its total, `done()` closes everything still open under it, `fail()` and `cancel()` cancel it. Changing a task that has ended does nothing, so a loop checks `canceled`. Task ids start with `_`, which a server id never does: a graft cannot clash with the tree it is grafted to, and `rowView` marks its rows `local`.
+
+A graft is drawn as a child of its server task and counts towards it. It is kept apart from what the server sends, so a reset or a reconnect puts it back, and it waits for its task if that has not arrived yet. Two rules hold it to the server's tree:
+
+- A server task with browser work still open under it is not through: it reads 99%, and is drawn as running, however soon the server calls it done.
+- A server task that fails or is canceled cancels the browser work under it, and its `onCancel` handlers run.
+
+Only this page sees a graft - other viewers, the terminal and the server's own percent know nothing of it. The cancel button on a local task cancels it here, never asking the server. Sharing browser work with the server is in [TODO](TODO.md).
+
+React takes grafts as a prop, `<TaskTreeView url={url} grafts={[{ path, local: work }]} />`; keep the array the same one while it does not change.
+
+#### Uploads
+
+The case nearly everyone has: the server opens a task for the files it waits on, and the browser uploads them. `trackUpload(xhr, task)` follows an `XMLHttpRequest`'s upload events - `fetch` has none for request bodies - and ends the task the way the request ends:
+
+```js
+import { LocalTasks, trackUpload } from "/task_progress/local_tasks.js"
+
+// The server opened "Receive files" for this, and streams the job's tree to the page
+const uploads = new LocalTasks("Upload from this browser", { cancelable: true })
+application.getControllerForElementAndIdentifier(treeElement, "task-tree").graft(receiveFiles.path, uploads)
+
+const sent = [...fileInput.files].map((file) => {
+  const xhr = new XMLHttpRequest()
+  xhr.open("PUT", `/jobs/42/files/${encodeURIComponent(file.name)}`)
+  const task = trackUpload(xhr, uploads.root.subtask(file.name, { unit: "bytes", cancelable: true }), { abortOnCancel: true })
+  xhr.send(file)
+  return task.whenFinished()
+})
+const endings = await Promise.all(sent)  // "done", "failed" or "canceled", one per file
+endings.every((ending) => ending === "done") ? uploads.root.done() : uploads.root.fail(new Error("Not every file made it"))
+```
+
+- The task's total is the body's size, learned from the first progress event, and its count the bytes sent. Sending the last byte does not finish it - the server has yet to answer.
+- A 2xx answer finishes it. Any other status fails it with that status, as do a network error and a timeout. An abort cancels it.
+- It only reports, unless told otherwise: with `abortOnCancel: true`, canceling the task aborts the request - its cancel button, `uploads.root.cancel()`, or the server canceling "Receive files", which cancels the whole graft and every upload with it. Without it, a canceled task keeps its ending however the upload goes on.
+- Until every upload has ended and `uploads.root` is done, "Receive files" stays below 100%, even once the server calls it done.
+
+`whenFinished()` resolves with how a task ended, and `setTotal(n)` sets a total learned only once the work has started.
+
 ### row_view.js
 
-`rowView(tree, node)` is what one row shows, worked out once for every renderer: `key`, `path`, `depth`, `name`, `status`, `stale`, `percent`, `indeterminate`, `measure` (`12 MB / 40 MB`, `33 / 40`, `42%`, an elapsed time), `message` (with the rate and time left for a counted task), `icon`, `cancelable`.
+`rowView(tree, node)` is what one row shows, worked out once for every renderer: `key`, `path`, `depth`, `name`, `status` (a task done with something still running under it shows as `active`), `stale`, `local`, `percent`, `indeterminate`, `measure` (`12 MB / 40 MB`, `33 / 40`, `42%`, an elapsed time), `message` (with the rate and time left for a counted task), `icon`, `cancelable`.
 
 ### Stimulus
 
@@ -524,6 +585,6 @@ Reading is for writers we do not trust - a subprocess, a stream relayed from els
 | Gap, stale, recover | A mount loses a batch, goes stale, and recovers from a fresh squash. |
 | Ractors | Four Ractors, each mounted here. Ruby 4.0. |
 
-Both renderers follow the same job side by side, over a stream of their own each, with a stream inspector counting frames, ops, resets, gaps, duplicates, reconnects, batches and renders a second. You can cancel a job or any cancelable task, cut the stream every N frames to watch it resume, or join a running job late. The page and its scripts are served by Assiette, a development dependency only.
+Both renderers follow the same job side by side, over a stream of their own each, with a stream inspector counting frames, ops, resets, gaps, duplicates, reconnects, batches and renders a second. You can cancel a job or any cancelable task, cut the stream every N frames to watch it resume, or join a running job late. "Run work in this browser" grafts pretend file hashing under the job's root in both panes: the job stays below 100% until it is through, however soon the server finishes. The page and its scripts are served by Assiette, a development dependency only.
 
 The terminal demo is `ruby -Ilib examples/cli_demo.rb`, and the same piped: `ruby -Ilib examples/cli_demo.rb | cat`.

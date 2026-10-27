@@ -17,7 +17,7 @@ export const nextFrame = globalThis.requestAnimationFrame
 const STRUCTURAL = new Set(["open", "put", "prune"])
 const NOTABLE = new Set(["done", "fail", "cancel", "say"])
 
-const blankChanges = () => ({ batches: 0, touched: new Set(), events: [], structure: false })
+const blankChanges = () => ({ batches: 0, touched: new Set(), events: [], structure: false, local: false })
 
 export class RenderQueue {
   // onFrame(tree, changes) - changes is { batches, touched, events, structure }. `structure` says
@@ -29,6 +29,12 @@ export class RenderQueue {
     this.changes = blankChanges()
     this.pending = false
     this.closed = false
+    // What a graft of browser tasks changes is drawn the same way, in the same frames
+    tree.onLocalChange = (ops) => {
+      for (const [path, op, value] of ops) this.#note(path, op, value, null)
+      this.changes.local = true
+      this.#request()
+    }
   }
 
   apply(batch) {
@@ -50,7 +56,7 @@ export class RenderQueue {
     this.pending = false
     if (this.closed) return
     const changes = this.changes
-    if (changes.batches === 0) return
+    if (changes.batches === 0 && !changes.local) return
     this.changes = blankChanges()
     this.onFrame(this.tree, changes)
   }

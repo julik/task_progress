@@ -5,6 +5,7 @@
 //   followEventSourceAt(url, onChange)   a TaskProgress::SSE stream, drawn at most once a frame
 //   followBatches(onChange)              the same, for batches you get some other way
 //   applyBatchTo(batch, tree)            folds one batch into a tree, in place
+//   tree.graft(path, localTasks)         draws tasks running in this browser under a server task
 
 import { RenderQueue } from "./render_queue.js"
 import { pathKey as key } from "./paths.js"
@@ -32,6 +33,8 @@ export class TaskTree {
     this.stale = false
     this.clock = clock
     this.offset = null
+    this.grafts = []
+    this.onLocalChange = null // set by a RenderQueue, to draw what a graft changes
   }
 
   // Now, by the clock of whoever wrote the tree - so an elapsed time is never off by the skew
@@ -54,7 +57,65 @@ export class TaskTree {
     this.log = batch.log
     this.seq = batch.seq
     this.stale = false
+    for (const graft of this.grafts) this.#tend(graft)
     return "applied"
+  }
+
+  // Draws tasks running in this browser - a LocalTasks - as a child of the server task at
+  // `path`. Only this tree sees them. The graft is kept apart from what the server sends, so a
+  // reset or a reconnect, which starts the server's tree over, puts it back; and it waits for
+  // its task if that has not arrived yet. Returns a function that takes it off again.
+  //
+  // A server task with browser work still open under it is not complete - it reads 99% and
+  // is drawn as running even once the server has called it done. A server task that fails or
+  // is canceled cancels the browser work under it
+  graft(path, local) {
+    const graft = { anchor: [...path], local, id: local.log }
+    this.grafts.push(graft)
+    const unsubscribe = local.subscribe((batch) => this.#graftOps(graft, batch.ops, batch.at))
+    this.#tend(graft)
+    return () => {
+      unsubscribe()
+      this.grafts = this.grafts.filter((g) => g !== graft)
+      const top = [...graft.anchor, graft.id]
+      if (!this.get(top)) return
+      const prefix = key(top)
+      for (const k of [...this.nodes.keys()]) if (k === prefix || k.startsWith(prefix + "-")) this.nodes.delete(k)
+      const anchor = this.get(graft.anchor)
+      if (anchor) anchor.children = anchor.children.filter((id) => id !== graft.id)
+      this.onLocalChange?.([[top, "prune"]])
+    }
+  }
+
+  // Cancels a task running in this browser, by its path in this tree. Server tasks are not
+  // this tree's to end - see requestCancel
+  cancelLocal(path, reason) {
+    const graft = this.grafts.find((g) => key([...g.anchor, g.id]) === key(path.slice(0, g.anchor.length + 1)))
+    graft?.local.at(path.slice(graft.anchor.length + 1))?.cancel(reason)
+  }
+
+  // Puts a graft back if the server's tree lost it, and cancels it if its server task ended badly
+  #tend(graft) {
+    const anchor = this.get(graft.anchor)
+    if (!anchor) return
+    if (!this.get([...graft.anchor, graft.id])) {
+      const squash = graft.local.squash()
+      this.#graftOps(graft, squash.ops, squash.at)
+    }
+    if (ENDED_WITHOUT_DONE.has(anchor.status) && !graft.local.root.finished) graft.local.root.cancel(anchor.message ?? `${anchor.name} ${anchor.status}`)
+  }
+
+  #graftOps(graft, ops, at) {
+    if (!this.get(graft.anchor)) return
+    const top = [...graft.anchor, graft.id]
+    // Lost to a reset or a prune since: the local tree already holds this change, so put it back whole
+    if (!this.get(top) && !(ops[0]?.[0].length === 0 && (ops[0][1] === "open" || ops[0][1] === "put"))) {
+      const squash = graft.local.squash()
+      return this.#graftOps(graft, squash.ops, squash.at)
+    }
+    const moved = ops.map(([path, op, value]) => [[...top, ...path], op, value])
+    for (const [path, op, value] of moved) this.#applyOp(path, op, value, at)
+    this.onLocalChange?.(moved)
   }
 
   get(path) { return this.nodes.get(key(path)) }
