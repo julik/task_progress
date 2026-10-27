@@ -8,10 +8,12 @@ The progress is not a mutable structure but an _event log_ which allows task pro
 
 Any run of batches can be squashed into one, and a reader that joins late starts from that squash. This also lends itself perfectly to redraw-the-world UIs like React - but using it with Stimulus is a breeze as well.
 
+<div>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/bench-dark.png">
-  <img alt="The bench (bin/dev) mid-job: an import with worker threads and an engine subprocess mounted under its own node, drawn by the Stimulus and React renderers side by side above the stream inspector" src="docs/bench-light.png">
+  <img alt="The bench (bin/dev) mid-job: an import with worker threads and an engine subprocess mounted under its own node, drawn by the Stimulus and React renderers side by side above the stream inspector" src="docs/bench-light.png" width="100%">
 </picture>
+</div>
 
 The [MANUAL](MANUAL.md) has everything; this page has what you need first.
 
