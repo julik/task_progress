@@ -55,8 +55,8 @@ class TaskProgress
   autoload :MemoryCache, "#{PARTS}/memory_cache"
   autoload :CancellationsApp, "#{PARTS}/cancellations_app"
   autoload :RailsDefaults, "#{PARTS}/rails_defaults"
-  autoload :MemoryStream, "#{PARTS}/memory_stream"
-  autoload :RedisStream, "#{PARTS}/redis_stream"
+  autoload :MemoryStreamStore, "#{PARTS}/memory_stream_store"
+  autoload :RedisStreamStore, "#{PARTS}/redis_stream_store"
   autoload :StreamOutput, "#{PARTS}/stream_output"
   autoload :StreamReader, "#{PARTS}/stream_reader"
   autoload :Poll, "#{PARTS}/poll"
@@ -243,20 +243,21 @@ class TaskProgress
 
   private_class_method :cli_output, :finish_at_exit, :close
 
-  @stream = nil #: untyped
-  @stream_lock = Mutex.new #: Thread::Mutex
+  @stream_store = nil #: untyped
+  @stream_store_lock = Mutex.new #: Thread::Mutex
 
-  # Where `handoff`, `adopt` and `follow` keep trees, unless told otherwise: a MemoryStream for
-  # this process alone, until it is set to something every process can reach
+  # Where handed-off trees are kept, unless a call says otherwise - one connection, as
+  # `Rails.cache` is, and every tree in it a stream of its own under its own key. Until it is set,
+  # a MemoryStreamStore, for this process alone; set it to something every process can reach
   #
-  #     TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+  #     TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
   #: () -> untyped
-  def self.stream = @stream || @stream_lock.synchronize { @stream ||= MemoryStream.new }
+  def self.stream_store = @stream_store || @stream_store_lock.synchronize { @stream_store ||= MemoryStreamStore.new }
 
-  # Sets where trees are kept, see `stream`
+  # Sets where handed-off trees are kept, see `stream_store`
   #: (untyped) -> void
-  def self.stream=(stream)
-    @stream = stream
+  def self.stream_store=(store)
+    @stream_store = store
   end
 
   # A root to hand to whoever does the work - a job, a worker, another machine - which takes it
@@ -267,12 +268,12 @@ class TaskProgress
   #     ImportJob.perform_later(upload, import)        # ActiveJob takes the task itself
   #     Importer.perform_async(upload.id, import.key)  # anything else, its key
   #
-  # The tree lives in `stream` under `key`. Once it is handed off, leave it to the worker: what
+  # The tree lives in `stream_store`, under `key`. Once it is handed off, leave it to the worker: what
   # this side writes after the worker has started is ignored
-  #: (String, ?stream: untyped, **untyped) -> TaskProgress
-  def self.handoff(name, stream: self.stream, retain: 86_400, **attributes)
+  #: (String, ?stream_store: untyped, **untyped) -> TaskProgress
+  def self.handoff(name, stream_store: self.stream_store, retain: 86_400, **attributes)
     key = StreamOutput.key_for(Log.new.id)
-    new(name, outputs: [StreamOutput.new(stream, key, retain:)], log: Log.new(key:), **attributes)
+    new(name, outputs: [StreamOutput.new(stream_store, key, retain:)], log: Log.new(key:), **attributes)
   end
 
   # Takes up a tree handed off with `handoff` - by its key, or the task itself - as a root of
@@ -283,14 +284,14 @@ class TaskProgress
   # whoever follows that it is alive, and takes the cancel requests that came. With a block,
   # the block is the root's work, see `run`, and it all stops when the block returns. Without
   # one, call `log.close` once the work is over - ActiveJob does this by itself, see JobSerializer
-  #: (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
-  #: [T] (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
-  def self.adopt(key, stream: self.stream, heartbeat: 1, interval: 0.1, retain: 86_400, &block)
+  #: (String | TaskProgress, ?stream_store: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+  #: [T] (String | TaskProgress, ?stream_store: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  def self.adopt(key, stream_store: self.stream_store, heartbeat: 1, interval: 0.1, retain: 86_400, &block)
     key = key.key || raise(ArgumentError, "#{key.inspect} was not handed off") if key.is_a?(TaskProgress)
-    snapshot = StreamReader.new(stream, key).snapshot
+    snapshot = StreamReader.new(stream_store, key).snapshot
     handed = snapshot && State.fold(snapshot.events)[[]]
     raise KeyError.new("Nothing was handed off at #{key}, or it has expired", key:) unless snapshot && handed
-    writer = StreamOutput.new(stream, key, heartbeat:, retain:, took_over: snapshot.log)
+    writer = StreamOutput.new(stream_store, key, heartbeat:, retain:, took_over: snapshot.log)
     output = BufferedOutput.new(writer, interval:)
     log = Log.new(key:)
     log.on_close do
@@ -313,10 +314,10 @@ class TaskProgress
   # Draws the tree handed off at `key` where a command-line program draws one (see `cli`) until it
   # finishes, and returns it. Ctrl-C stops watching, and leaves the work alone. What
   # `task_progress watch` does
-  #: (String, ?stream: untyped, ?io: IO | StringIO) -> TaskProgress
-  def self.watch(key, stream: self.stream, io: $stderr)
+  #: (String, ?stream_store: untyped, ?io: IO | StringIO) -> TaskProgress
+  def self.watch(key, stream_store: self.stream_store, io: $stderr)
     output = cli_output(io:, quiet: false)
-    follow(key, stream:) do |tree|
+    follow(key, stream_store:) do |tree|
       tree.add_output(output)
       sleep(0.1) until tree.finished?
       tree
@@ -327,17 +328,17 @@ class TaskProgress
     end
   end
 
-  # A tree that mirrors the one in `stream` at `key`, kept up to date on a thread of its own -
+  # A tree that mirrors the one in `stream_store` at `key`, kept up to date on a thread of its own -
   # for drawing it anywhere: a terminal, a parent's tree, an endpoint of your own. Requests to
   # cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and fails
   # after `give_up_after` seconds of that, see Mount#follow_stream. With a block, it follows for
   # as long as the block runs; without one, `log.close` stops it. SSE and Poll take the key
   # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError
-  #: (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
-  #: [T] (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
-  def self.follow(key, stream: self.stream, poll: 1, give_up_after: 60)
-    root, mount = mirror(key, stream)
-    mount.follow_stream(stream, key, poll:, give_up_after:)
+  #: (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+  #: [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
+  def self.follow(key, stream_store: self.stream_store, poll: 1, give_up_after: 60)
+    root, mount = mirror(key, stream_store)
+    mount.follow_stream(stream_store, key, poll:, give_up_after:)
     return root unless block_given?
     begin
       yield root
@@ -346,13 +347,13 @@ class TaskProgress
     end
   end
 
-  # The tree in `stream` at `key` as it is now, read once - for a page, or one poll, that needs
+  # The tree in `stream_store` at `key` as it is now, read once - for a page, or one poll, that needs
   # no more than that. See `follow` for one kept up to date. A key nothing was handed off at -
   # or whose tree has expired - is a KeyError, as with Hash#fetch
-  #: (String, ?stream: untyped) -> TaskProgress
-  def self.fetch(key, stream: self.stream)
-    root, mount = mirror(key, stream)
-    mount.follow_stream(stream, key, watch: false)
+  #: (String, ?stream_store: untyped) -> TaskProgress
+  def self.fetch(key, stream_store: self.stream_store)
+    root, mount = mirror(key, stream_store)
+    mount.follow_stream(stream_store, key, watch: false)
     root
   end
 
@@ -380,8 +381,8 @@ class TaskProgress
 
   # A root that is a mount and nothing else, named after `key` until the stream says otherwise
   #: (String, untyped) -> [TaskProgress, Mount]
-  def self.mirror(key, stream)
-    StreamReader.new(stream, key).snapshot or raise KeyError.new("Nothing was handed off at #{key}, or it has expired", key:)
+  def self.mirror(key, stream_store)
+    StreamReader.new(stream_store, key).snapshot or raise KeyError.new("Nothing was handed off at #{key}, or it has expired", key:)
     log = Log.new(key:)
     root = new(key, log:)
     mount = Mount.new(log, [], own: false)

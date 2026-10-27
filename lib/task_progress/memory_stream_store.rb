@@ -2,8 +2,9 @@
 # rbs_inline: enabled
 
 class TaskProgress
-  # A stream kept in this process: what TaskProgress.stream is until told otherwise, and what
-  # the tests and the bench run on. It does what RedisStream does - append-only entries under a
+  # A stream store kept in this process - a stream per tree, each under its own key: what
+  # TaskProgress.stream_store is until told otherwise, and what the tests and the bench run on.
+  # It does what RedisStreamStore does - append-only entries under a
   # key, read from an id on and waited for, trimmed from the front, plus plain values that
   # expire - so a tree handed off here behaves as one handed off through Redis, as long as the
   # job runs in the same process.
@@ -13,7 +14,7 @@ class TaskProgress
   # `set`, `trim`, `delete` and `expire` take a `guard:` - a key and the value it must hold - and
   # do nothing, returning false, unless it does. Checked and done in one step, which is what keeps
   # a writer another has replaced from writing over it, see StreamOutput
-  class MemoryStream
+  class MemoryStreamStore
     # @rbs @entries: Hash[String, Array[[Integer, String]]]
     # @rbs @values: Hash[String, String]
     # @rbs @expiries: Hash[String, Float]

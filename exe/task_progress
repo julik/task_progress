@@ -25,9 +25,9 @@ rescue LoadError
   abort "task_progress watch needs the redis-client gem"
 end
 
-stream = TaskProgress::RedisStream.new(RedisClient.config(url:).new_pool(size: 2))
+stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url:).new_pool(size: 2))
 begin
-  exit(TaskProgress.watch(key, stream:).complete? ? 0 : 1)
+  exit(TaskProgress.watch(key, stream_store:).complete? ? 0 : 1)
 rescue KeyError => e
   abort e.message
 end

@@ -79,7 +79,7 @@ gem "task_progress"
 gem "redis-client"
 
 # config/initializers/task_progress.rb
-TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV.fetch("REDIS_URL", "redis://localhost:6379")).new_pool(size: 10))
+TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV.fetch("REDIS_URL", "redis://localhost:6379")).new_pool(size: 10))
 ```
 
 In development with the `:async` queue adapter, jobs run in the same process as the pages, and you can leave this out - the stream is then kept in memory.
@@ -236,7 +236,7 @@ Every video shows from the start, waiting its turn. `TaskProgress.cli` in the wo
 [100%   4.7s] ✓ Transcode 2 files  4.1s
 ```
 
-ffmpeg is a process of its own already, so the relay works from threads in one Ruby process just as well. A Ruby process per video is what to reach for when the Ruby side does real work of its own, or might fall over. Workers on other machines report the same way through Redis: hand each one a tree with `TaskProgress.handoff`, `adopt` it in the worker, and mount it in the parent with `root.mount(name).follow_stream(TaskProgress.stream, key)`. `task_progress watch KEY` draws any one of them from yet another terminal.
+ffmpeg is a process of its own already, so the relay works from threads in one Ruby process just as well. A Ruby process per video is what to reach for when the Ruby side does real work of its own, or might fall over. Workers on other machines report the same way through Redis: hand each one a tree with `TaskProgress.handoff`, `adopt` it in the worker, and mount it in the parent with `root.mount(name).follow_stream(TaskProgress.stream_store, key)`. `task_progress watch KEY` draws any one of them from yet another terminal.
 
 ## A Rails action that streams its own progress to React
 

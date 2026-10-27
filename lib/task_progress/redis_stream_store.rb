@@ -2,11 +2,11 @@
 # rbs_inline: enabled
 
 class TaskProgress
-  # A stream in Redis: entries in a Redis stream (XADD, XREAD, XTRIM), values in plain keys. It
+  # A stream store in Redis: each tree a Redis stream of its own (XADD, XREAD, XTRIM), its values in plain keys. It
   # takes a redis-client connection or pool (`RedisClient.config(url:).new_pool`), or a redis-rb
   # `Redis` - neither is a dependency of this gem, and nothing here loads one.
   #
-  #     TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+  #     TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
   #
   # Needs Redis 6.2 or later, for trimming by id. A reader that waits holds its connection for
   # as long as it waits - a pool sized for the readers that follow at once keeps the rest moving.
@@ -14,8 +14,8 @@ class TaskProgress
   # follows trees a client of its own.
   #
   # A write with a `guard:` - a key and the value it must hold - runs as a Lua script, so the
-  # check and the write are one step, see MemoryStream
-  class RedisStream
+  # check and the write are one step, see MemoryStreamStore
+  class RedisStreamStore
     # The guarded writes. KEYS[1] is the guard, ARGV[1] the value it must hold
     GUARDED = {
       set: "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end " \

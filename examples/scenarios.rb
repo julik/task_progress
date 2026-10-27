@@ -163,10 +163,10 @@ module Scenarios
   define "handoff", "Handed off, lost, retried",
     "A job handed off to a worker - a process through Redis, or a thread when there is no Redis - and mounted here from the stream. Halfway the worker is killed: its beat stops, the job goes stale, then fails. A retry adopts it as attempt 2, starts it over, and finishes." do |speed:|
     nap = napper(speed)
-    stream = redis ? TaskProgress::RedisStream.new(redis) : TaskProgress::MemoryStream.new
+    stream_store = redis ? TaskProgress::RedisStreamStore.new(redis) : TaskProgress::MemoryStreamStore.new
     served = TaskProgress.new("Nightly thumbnails", cancelable: true)
-    job = TaskProgress.handoff("Thumbnail job", stream:, cancelable: true)
-    mount = served.mount("Thumbnail job", cancelable: true).follow_stream(stream, job.key, poll: 0.1, give_up_after: 2.5 / speed)
+    job = TaskProgress.handoff("Thumbnail job", stream_store:, cancelable: true)
+    mount = served.mount("Thumbnail job", cancelable: true).follow_stream(stream_store, job.key, poll: 0.1, give_up_after: 2.5 / speed)
     worker = lambda do
       if redis
         pid = Process.spawn(RbConfig.ruby, File.expand_path("stream_worker.rb", __dir__), job.key, "--speed", speed.to_s)
@@ -180,7 +180,7 @@ module Scenarios
           }
         }
       else
-        root = TaskProgress.adopt(job.key, stream:, heartbeat: 0.25)
+        root = TaskProgress.adopt(job.key, stream_store:, heartbeat: 0.25)
         thread = Thread.new do
           root.run do
             images = root.subtask("Thumbnails", total: 40, cancelable: true)

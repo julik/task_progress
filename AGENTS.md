@@ -23,7 +23,7 @@ A change to the wire format touches `Wire` (what a reader accepts), `js/task_tre
 
 How a big family of tasks folds into rows lives in `State#rows` and `TaskTree#rows` together, and `test/fold_test.rb` holds the two to the same rows.
 
-The stream tests run against a real Redis when one answers on `REDIS_URL` (or localhost), through both redis-client and redis-rb, and skip without one. `RedisStream` must keep working with whatever client it is given - nothing in the gem loads one.
+The stream tests run against a real Redis when one answers on `REDIS_URL` (or localhost), through both redis-client and redis-rb, and skip without one. `RedisStreamStore` must keep working with whatever client it is given - nothing in the gem loads one.
 
 ## Types and docs
 

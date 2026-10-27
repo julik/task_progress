@@ -291,13 +291,15 @@ The tree lives in a **stream** - Redis in production - under its `key`, so anyth
 
 Adopting **starts the tree over**: the worker writes a fresh log whose first batch has `prev` 0, and followers replace what they had. That is what makes a retry clean. Whoever wrote before - the side that handed it off, a run that was given up on - is ignored from then on (a mount fed from the stream answers its batches with `:superseded`, a fifth outcome next to those of `<<`), so two writers never interleave.
 
-### Streams
+### The stream store
 
 ```ruby
-TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
 ```
 
-Until it is set, `TaskProgress.stream` is a `MemoryStream` - good for one process (the tests, the bench, an app that runs its jobs in the process that serves its pages) and for nothing else. `RedisStream` takes a [redis-client](https://github.com/redis-rb/redis-client) connection or pool, or a redis-rb `Redis`; neither is a dependency, and nothing loads one. It needs Redis 6.2 or later. A follower waiting for news holds its connection while it waits, so size the pool for the followers you expect at once; a redis-rb `Redis` is a single connection, which a follower would block for everything else.
+The stream store is where handed-off trees are kept: one connection, set once, the way `Rails.cache` is - and every tree in it a stream of its own, under a key of its own, which nothing else reads or writes. Two users' imports share a Redis and a connection pool, and nothing more. Any call that touches it takes `stream_store:`, for a tree, a tenant or a test kept somewhere else.
+
+Until it is set, `TaskProgress.stream_store` is a `MemoryStreamStore` - good for one process (the tests, the bench, an app that runs its jobs in the process that serves its pages) and for nothing else. `RedisStreamStore` takes a [redis-client](https://github.com/redis-rb/redis-client) connection or pool, or a redis-rb `Redis`; neither is a dependency, and nothing loads one. It needs Redis 6.2 or later. A follower waiting for news holds its connection while it waits, so size the pool for the followers you expect at once; a redis-rb `Redis` is a single connection, which a follower would block for everything else.
 
 Under one key, `StreamOutput` keeps:
 
@@ -310,7 +312,7 @@ Under one key, `StreamOutput` keeps:
 
 The braces make the id a Redis Cluster hash tag, so all four land on one node. A snapshot is taken at the first batch, every two seconds after and when the root finishes, and each one trims the stream back to the one before - so however spammy the work, the stream stays a couple of seconds long. Once the root has finished, it all expires after a day (`retain:`). A worker sends its batches squashed, ten times a second at most (`interval:`).
 
-Another kind of stream is anything with `append(key, data) -> id`, `read(key, after:, timeout:) -> [[id, data]]`, `get`, `set(key, value, expires_in:)`, `delete`, `trim(key, before:)` and `expire(key, seconds)`.
+Another kind of stream store is anything with `append(key, data) -> id`, `read(key, after:, timeout:) -> [[id, data]]`, `get`, `set(key, value, expires_in:)`, `delete`, `trim(key, before:)` and `expire(key, seconds)`.
 
 ### When the worker goes away
 
@@ -647,7 +649,7 @@ createTaskTreeRoot(element).render({ url, cancelUrl, cancelToken })      // on a
 
 ### Rows and cancel buttons
 
-`task_tree.css` styles the rows both renderers draw: one fixed height, so nothing jumps as glyphs change. The palette sits on `:where(.tree)`, which weighs nothing - any selector of yours overrides it. A cancelable task that has not finished gets a cancel button right of its bar; the column is there on every row, so bars line up. Pressed, the button stays pressed until the cancel comes down the stream - or comes back to life if the server says no.
+`task_tree.css` styles the rows both renderers draw: one fixed height, so nothing jumps as glyphs change. The palette sits on `:where(.tree)`, which weighs nothing - any selector of yours overrides it; `--stripe` is the light stripe of the barber pole a task with no measure is drawn as, which crawls along while it runs and stands still for whoever prefers reduced motion. The terminal draws the same pole, `╱╱╱░░░`. A cancelable task that has not finished gets a cancel button right of its bar; the column is there on every row, so bars line up. Pressed, the button stays pressed until the cancel comes down the stream - or comes back to life if the server says no.
 
 `requestCancel(url, path, { token })` posts `{path, token}` as JSON, for your own buttons.
 

@@ -41,10 +41,10 @@ class TaskProgress
     # Streams the task - its subtree only, for a subtask - or the tree handed off at a key, from
     # `stream`. It pings every `heartbeat` seconds of quiet, and tells the browser to reconnect
     # after `reconnect` seconds
-    #: (TaskProgress | Log | String, ?stream: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
-    def initialize(source, stream: TaskProgress.stream, heartbeat: 15, reconnect: 2)
+    #: (TaskProgress | Log | String, ?stream_store: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
+    def initialize(source, stream_store: TaskProgress.stream_store, heartbeat: 15, reconnect: 2)
       @close = source.is_a?(String)
-      @source = source.is_a?(String) ? TaskProgress.follow(source, stream:) : source
+      @source = source.is_a?(String) ? TaskProgress.follow(source, stream_store:) : source
       @heartbeat = heartbeat
       @reconnect = reconnect
     end

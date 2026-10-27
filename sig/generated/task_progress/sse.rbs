@@ -39,8 +39,8 @@ class TaskProgress
     # Streams the task - its subtree only, for a subtask - or the tree handed off at a key, from
     # `stream`. It pings every `heartbeat` seconds of quiet, and tells the browser to reconnect
     # after `reconnect` seconds
-    # : (TaskProgress | Log | String, ?stream: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
-    def initialize: (TaskProgress | Log | String, ?stream: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
+    # : (TaskProgress | Log | String, ?stream_store: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
+    def initialize: (TaskProgress | Log | String, ?stream_store: untyped, ?heartbeat: Integer | Float, ?reconnect: Integer | Float) -> void
 
     # Stops following a tree it followed by its key - Rack calls it when the response is over
     # : () -> void

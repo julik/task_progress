@@ -109,16 +109,17 @@ class TaskProgress
   # : (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
   def self.watch_cancellations: (TaskProgress, TurboStreamOutput::_Store, String, Integer | Float) -> Thread
 
-  # Where `handoff`, `adopt` and `follow` keep trees, unless told otherwise: a MemoryStream for
-  # this process alone, until it is set to something every process can reach
+  # Where handed-off trees are kept, unless a call says otherwise - one connection, as
+  # `Rails.cache` is, and every tree in it a stream of its own under its own key. Until it is set,
+  # a MemoryStreamStore, for this process alone; set it to something every process can reach
   #
-  #     TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+  #     TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
   # : () -> untyped
-  def self.stream: () -> untyped
+  def self.stream_store: () -> untyped
 
-  # Sets where trees are kept, see `stream`
+  # Sets where handed-off trees are kept, see `stream_store`
   # : (untyped) -> void
-  def self.stream=: (untyped) -> void
+  def self.stream_store=: (untyped) -> void
 
   # A root to hand to whoever does the work - a job, a worker, another machine - which takes it
   # up with `adopt`. Until then it waits, as "pending", where anyone can `follow` it: a page can
@@ -128,10 +129,10 @@ class TaskProgress
   #     ImportJob.perform_later(upload, import)        # ActiveJob takes the task itself
   #     Importer.perform_async(upload.id, import.key)  # anything else, its key
   #
-  # The tree lives in `stream` under `key`. Once it is handed off, leave it to the worker: what
+  # The tree lives in `stream_store`, under `key`. Once it is handed off, leave it to the worker: what
   # this side writes after the worker has started is ignored
-  # : (String, ?stream: untyped, **untyped) -> TaskProgress
-  def self.handoff: (String, ?stream: untyped, **untyped) -> TaskProgress
+  # : (String, ?stream_store: untyped, **untyped) -> TaskProgress
+  def self.handoff: (String, ?stream_store: untyped, **untyped) -> TaskProgress
 
   # Takes up a tree handed off with `handoff` - by its key, or the task itself - as a root of
   # its own, with the name and attributes it was handed off with. It starts the tree over: a
@@ -141,33 +142,33 @@ class TaskProgress
   # whoever follows that it is alive, and takes the cancel requests that came. With a block,
   # the block is the root's work, see `run`, and it all stops when the block returns. Without
   # one, call `log.close` once the work is over - ActiveJob does this by itself, see JobSerializer
-  # : (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
-  # : [T] (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
-  def self.adopt: (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
-                | [T] (String | TaskProgress, ?stream: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  # : (String | TaskProgress, ?stream_store: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+  # : [T] (String | TaskProgress, ?stream_store: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
+  def self.adopt: (String | TaskProgress, ?stream_store: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) -> TaskProgress
+                | [T] (String | TaskProgress, ?stream_store: untyped, ?heartbeat: Integer | Float, ?interval: Integer | Float) { (TaskProgress) -> T } -> T?
 
   # Draws the tree handed off at `key` where a command-line program draws one (see `cli`) until it
   # finishes, and returns it. Ctrl-C stops watching, and leaves the work alone. What
   # `task_progress watch` does
-  # : (String, ?stream: untyped, ?io: IO | StringIO) -> TaskProgress
-  def self.watch: (String, ?stream: untyped, ?io: IO | StringIO) -> TaskProgress
+  # : (String, ?stream_store: untyped, ?io: IO | StringIO) -> TaskProgress
+  def self.watch: (String, ?stream_store: untyped, ?io: IO | StringIO) -> TaskProgress
 
-  # A tree that mirrors the one in `stream` at `key`, kept up to date on a thread of its own -
+  # A tree that mirrors the one in `stream_store` at `key`, kept up to date on a thread of its own -
   # for drawing it anywhere: a terminal, a parent's tree, an endpoint of your own. Requests to
   # cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and fails
   # after `give_up_after` seconds of that, see Mount#follow_stream. With a block, it follows for
   # as long as the block runs; without one, `log.close` stops it. SSE and Poll take the key
   # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError
-  # : (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
-  # : [T] (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
-  def self.follow: (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
-                 | [T] (String, ?stream: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
+  # : (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+  # : [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
+  def self.follow: (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
+                 | [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
 
-  # The tree in `stream` at `key` as it is now, read once - for a page, or one poll, that needs
+  # The tree in `stream_store` at `key` as it is now, read once - for a page, or one poll, that needs
   # no more than that. See `follow` for one kept up to date. A key nothing was handed off at -
   # or whose tree has expired - is a KeyError, as with Hash#fetch
-  # : (String, ?stream: untyped) -> TaskProgress
-  def self.fetch: (String, ?stream: untyped) -> TaskProgress
+  # : (String, ?stream_store: untyped) -> TaskProgress
+  def self.fetch: (String, ?stream_store: untyped) -> TaskProgress
 
   # Runs the block as the work of every root among `arguments` that a worker took up with `adopt`
   # - done when it returns, failed when it raises - and closes them after. What JobSerializer

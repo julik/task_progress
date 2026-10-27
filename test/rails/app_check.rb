@@ -222,7 +222,7 @@ class RailsAppCheck < Minitest::Test
     perform_enqueued_jobs { HaltingJob.perform_later(import) }
     tree = TaskProgress.fetch(import.key)
     assert_equal [:failed, "The job stopped before it began its work"], [tree.status, tree.error[:message]]
-    assert_nil TaskProgress.stream.get(TaskProgress::StreamOutput.beat_key(import.key)), "and not beating"
+    assert_nil TaskProgress.stream_store.get(TaskProgress::StreamOutput.beat_key(import.key)), "and not beating"
   end
 
   def test_a_task_from_this_process_alone_cannot_go_to_a_job

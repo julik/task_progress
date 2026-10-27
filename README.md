@@ -97,7 +97,7 @@ Where SSE does not get through, `TaskProgress::Poll` answers plain GETs - with a
 Create the tree here, and let a job write to it there - through Redis:
 
 ```ruby
-TaskProgress.stream = TaskProgress::RedisStream.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
 
 import = TaskProgress.handoff("Importing", cancelable: true)
 ImportJob.perform_later(upload, import)                    # the task is an argument like any other

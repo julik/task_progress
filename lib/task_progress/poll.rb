@@ -30,11 +30,11 @@ class TaskProgress
 
     # A whole Rack response for the task's tree - its subtree, for a subtask - or for the tree
     # handed off at a key, in `stream`
-    #: (TaskProgress | String, ?Hash[String, untyped], ?stream: untyped, ?max_wait: Integer | Float) -> [Integer, Hash[String, String], Array[String]]
-    def self.response(source, env = {}, stream: TaskProgress.stream, max_wait: 25)
+    #: (TaskProgress | String, ?Hash[String, untyped], ?stream_store: untyped, ?max_wait: Integer | Float) -> [Integer, Hash[String, String], Array[String]]
+    def self.response(source, env = {}, stream_store: TaskProgress.stream_store, max_wait: 25)
       waiting = wait(env, max_wait)
       return answer(source, env, waiting) if source.is_a?(TaskProgress)
-      waiting.positive? ? TaskProgress.follow(source, stream:) { answer(it, env, waiting) } : answer(TaskProgress.fetch(source, stream:), env, 0.0)
+      waiting.positive? ? TaskProgress.follow(source, stream_store:) { answer(it, env, waiting) } : answer(TaskProgress.fetch(source, stream_store:), env, 0.0)
     rescue KeyError
       [404, HEADERS, [JSON.generate({error: "Nothing to follow"})]]
     end

@@ -39,10 +39,10 @@ class TaskProgress
     # Streams `task`, drawn by `renderer` - an HTMLRenderer, or anything that answers `id` and
     # `render(snapshot, from)`, `from` being the task's path. `source` is the id of the
     # `<turbo-stream-source>` to remove at the end
-    #: (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
-    def initialize(task, renderer:, stream: TaskProgress.stream, interval: 0.25, heartbeat: 15, reconnect: 2, source: nil)
+    #: (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream_store: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
+    def initialize(task, renderer:, stream_store: TaskProgress.stream_store, interval: 0.25, heartbeat: 15, reconnect: 2, source: nil)
       @close = task.is_a?(String)
-      @task = task.is_a?(String) ? TaskProgress.follow(task, stream:) : task
+      @task = task.is_a?(String) ? TaskProgress.follow(task, stream_store:) : task
       @reconnect = reconnect
       @renderer = renderer
       @interval = interval

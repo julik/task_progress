@@ -22,13 +22,13 @@ root = TaskProgress.new("bench", outputs: [TaskProgress::BufferedOutput.new(->(_
 task = root.subtask("ticks", total: N)
 measure("tick, through a BufferedOutput", N) { N.times { task.tick } }
 
-stream = TaskProgress::MemoryStream.new
-import = TaskProgress.handoff("bench", stream:)
-adopted = TaskProgress.adopt(import.key, stream:)
+stream_store = TaskProgress::MemoryStreamStore.new
+import = TaskProgress.handoff("bench", stream_store:)
+adopted = TaskProgress.adopt(import.key, stream_store:)
 task = adopted.subtask("ticks", total: N)
-measure("tick, adopted, to a MemoryStream", N) { N.times { task.tick } }
+measure("tick, adopted, to a MemoryStreamStore", N) { N.times { task.tick } }
 adopted.log.close
-puts format("%-52s %10d entries left after trimming", "", stream.read(import.key).length)
+puts format("%-52s %10d entries left after trimming", "", stream_store.read(import.key).length)
 
 root = TaskProgress.new("bench")
 tasks = 4.times.map { root.subtask("t#{it}", total: N / 4) }

@@ -38,8 +38,8 @@ class TaskProgress
     # Streams `task`, drawn by `renderer` - an HTMLRenderer, or anything that answers `id` and
     # `render(snapshot, from)`, `from` being the task's path. `source` is the id of the
     # `<turbo-stream-source>` to remove at the end
-    # : (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
-    def initialize: (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
+    # : (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream_store: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
+    def initialize: (TaskProgress | String, renderer: TurboStreamOutput::_Renderer, ?stream_store: untyped, ?interval: Integer | Float, ?heartbeat: Integer | Float, ?reconnect: Integer | Float, ?source: String?) -> void
 
     # Yields the stream a chunk at a time, until the task finishes - as a Rack body does
     # : () { (String) -> void } -> void

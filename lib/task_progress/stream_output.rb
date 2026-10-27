@@ -4,7 +4,7 @@
 require "json"
 
 class TaskProgress
-  # Writes a tree to a stream - a MemoryStream, a RedisStream - for readers anywhere to follow
+  # Writes a tree to a stream - a MemoryStreamStore, a RedisStreamStore - for readers anywhere to follow
   # with StreamReader. What TaskProgress.handoff and TaskProgress.adopt write through. Under one
   # key it keeps:
   #

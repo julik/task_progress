@@ -25,8 +25,8 @@ class TaskProgress
 
     # A whole Rack response for the task's tree - its subtree, for a subtask - or for the tree
     # handed off at a key, in `stream`
-    # : (TaskProgress | String, ?Hash[String, untyped], ?stream: untyped, ?max_wait: Integer | Float) -> [Integer, Hash[String, String], Array[String]]
-    def self.response: (TaskProgress | String, ?Hash[String, untyped], ?stream: untyped, ?max_wait: Integer | Float) -> [ Integer, Hash[String, String], Array[String] ]
+    # : (TaskProgress | String, ?Hash[String, untyped], ?stream_store: untyped, ?max_wait: Integer | Float) -> [Integer, Hash[String, String], Array[String]]
+    def self.response: (TaskProgress | String, ?Hash[String, untyped], ?stream_store: untyped, ?max_wait: Integer | Float) -> [ Integer, Hash[String, String], Array[String] ]
 
     # : (TaskProgress, Hash[String, untyped], Float) -> [Integer, Hash[String, String], Array[String]]
     def self.answer: (TaskProgress, Hash[String, untyped], Float) -> [ Integer, Hash[String, String], Array[String] ]
