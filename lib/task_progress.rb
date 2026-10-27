@@ -28,7 +28,7 @@ class TaskProgress
   class Canceled < Exception # rubocop:disable Lint/InheritException
     attr_reader :task
 
-    def initialize(task, name)
+    def initialize(task, name = task.name)
       @task = task
       super("Task '#{name}' was canceled")
     end
@@ -213,6 +213,9 @@ class TaskProgress
     cancel!(e.message == "Interrupt" ? nil : e.message) # Ctrl-C calls the work off, it does not fail it
     raise
   rescue Exception => e # rubocop:disable Lint/RescueException
+    # Once called off, the work unwinding is no failure - an on_cancel that closed the connection
+    # the work was waiting on makes that call raise, and that is the cancel working
+    return nil if canceled?
     fail!(e)
     raise
   end

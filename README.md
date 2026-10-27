@@ -86,6 +86,59 @@ tokens.verify(params[:token]) == root.log.id       # when POST .../cancellations
 ```
 
 The bench shows it as a resource: `POST /jobs/:id/cancellations` creates the cancellation of one task, asking again gives back the same one, and its state settles to `canceled` or `moot`.
+
+## Writing work that can be canceled
+
+A cancel never stops a thread from the outside. It marks the task canceled, and the work stops when it next notices. Most work notices on its own; the rest needs a line or two.
+
+**Work that reports as it goes needs nothing.** The next `tick!`, `advance!` or `note` on a canceled task raises `TaskProgress::Canceled`. `run`, and so a `subtask` block, takes that as the end of that task's work: the task is canceled rather than failed, and the code after the block carries on.
+
+```ruby
+root.subtask("Rows", total: rows.size, cancelable: true) do |t|
+  rows.each { import(it) && t.tick! }
+end
+root.subtask("Publish") { publish! }  # still runs if Rows was canceled
+```
+
+**Clean up in `ensure`, or rescue `Canceled` for what only a cancel should undo.** It is an exception, so `ensure` runs as usual. Re-raise it, so `run` sees it:
+
+```ruby
+root.subtask("Export", cancelable: true) do |t|
+  File.open(tmp, "w") { |f| rows.each { f.puts(it) && t.tick! } }
+rescue TaskProgress::Canceled
+  File.delete(tmp)  # no half-written export
+  raise
+end
+```
+
+**Work that reports rarely can ask.** `canceled?` reads the tree without raising:
+
+```ruby
+poll.run { sleep(1) until poll.canceled? || ready? }
+```
+
+**Work that blocks needs unblocking.** A call that waits - an HTTP request, a socket read, a queue - will not touch its task until it returns. Give it an `on_cancel` that ends the wait. Whatever the call raises as it unblocks is taken as the cancel working, not as a failure:
+
+```ruby
+fetch.run do |t|
+  http = Net::HTTP.start(host)
+  t.on_cancel { http.finish }  # the request in flight raises, and the task ends as canceled
+  http.get(path)
+end
+```
+
+For a wait nothing can interrupt, raise into the thread instead: `me = Thread.current; t.on_cancel { me.raise(TaskProgress::Canceled.new(t)) }`. `on_cancel` runs on whichever thread canceled the task, so keep it to ending the wait.
+
+**Do not swallow it.** `Canceled` is an `Exception`, like `Interrupt`, so `rescue => e` lets it through. Code that rescues `Exception` should re-raise `TaskProgress::Canceled`.
+
+**Threads and child processes follow.** Canceling a task cancels everything still open under it, so workers on threads of their own each stop at their next tick. A child process started with `Mount#spawn` gets the request over its control pipe, and the same patterns apply inside it. A child too stuck to notice is sent TERM after the mount's `grace:`, which Ruby raises inside the work like any other exception.
+
+**Afterwards, `canceled?` tells what happened.** `run` returns `nil` for a task that was canceled, so code that needs the result can check:
+
+```ruby
+report = root.subtask("Report", cancelable: true) { |t| build_report(t) }
+mail(report) unless root.subtasks.last.canceled?
+```
 - `iterate(collection, name, total:, step:) { |item| }`: a subtask that advances once per item and finishes with the loop. Without a block, an Enumerator.
 - `puts(message)`: a line printed above the tree. The tree does not keep it, so a reader joining later does not see it.
 - A counted task is done once its count reaches its total; pass `autofinish: false` when the total is only a guess. `done!` also finishes every task still open under it.

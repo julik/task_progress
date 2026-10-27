@@ -315,6 +315,23 @@ class TaskTest < Minitest::Test
     assert_equal ["Not needed"], late, "registered after the cancel, it is called at once"
   end
 
+  def test_work_unblocked_by_on_cancel_ends_the_task_quietly
+    root = TaskProgress.new("Root")
+    reader, writer = IO.pipe
+    fetch = root.subtask("Fetch", cancelable: true)
+    worker = Thread.new do
+      root.run do
+        fetch.run { |t| t.on_cancel { reader.close } && reader.read }
+        root.subtask("After").done!
+      end
+    end
+    sleep 0.05
+    fetch.cancel!
+    worker.join
+    assert_equal [:canceled, :done], [fetch.status, root.status], "the IOError from the closed pipe is the cancel working"
+    writer.close
+  end
+
   def test_on_cancel_is_dropped_when_the_task_ends_otherwise
     root = TaskProgress.new("Root")
     task = root.subtask("Task")

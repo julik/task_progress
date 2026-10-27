@@ -112,8 +112,11 @@ class CrossProcessTest < Minitest::Test
       mount.spawn(RbConfig.ruby, "-I", LIB, "-rtask_progress", "-e", 'TaskProgress.cli("child") { |r| r.note("in"); sleep }', err: File::NULL, grace: 0.3)
     end
     sleep 0.05 until mount.task.status == :active
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     root.cancel!
-    assert worker.value.signaled?
+    worker.value
+    assert_in_delta 0.3, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, 0.5, "stopped by the TERM, after the grace period"
+    assert_equal :canceled, mount.task.status
   end
 
   def test_a_cancel_request_reaches_a_task_inside_the_child
