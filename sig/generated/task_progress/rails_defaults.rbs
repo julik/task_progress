@@ -19,8 +19,8 @@ class TaskProgress
     def self.for: (untyped) -> Hash[Symbol, untyped]
 
     # Tokens for the cancel buttons, signed with a key derived from the app's secret
-    # : () -> CancelToken
-    def self.tokens: () -> CancelToken
+    # : () -> Token
+    def self.tokens: () -> Token
 
     # Where the cancel buttons post, or nil when the app has turned that off
     # : () -> String?

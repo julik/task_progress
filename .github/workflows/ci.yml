@@ -44,3 +44,6 @@ jobs:
           bundle exec steep check
       - name: Docs
         run: bundle exec rake doc:check
+      # The browser client's TypeScript declarations, compiled against by a consumer of them
+      - name: Types (JS)
+        run: cd test/types && npm install --install-links --no-audit --no-fund && npm run check

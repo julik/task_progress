@@ -77,6 +77,11 @@ class TaskProgress
     # : (String) -> String
     def self.control_key: (String) -> String
 
+    # Whether a cancel request is for one of these runs. A request names the run it was sent to -
+    # the one its sender saw writing the tree; one from a parent's control pipe names none
+    # : (String, *String?) -> bool
+    def self.for_run?: (String, *String?) -> bool
+
     # The key that names the run writing the tree now
     # : (String) -> String
     def self.run_key: (String) -> String
@@ -133,10 +138,5 @@ class TaskProgress
 
     # : (Log) -> void
     def beat: (Log) -> void
-
-    # A request names the run it was sent to - the one its sender saw writing the tree. Ones from
-    # before runs were named, and from a parent's control pipe, name none
-    # : (String, String) -> bool
-    def for_this_run?: (String, String) -> bool
   end
 end

@@ -36,7 +36,7 @@ The type annotations, the type checks and the docs are part of the code, and are
 
 ## JS
 
-`js/` ships in the gem: plain ES modules, no build step, relative imports inside the directory, and bare names (`@hotwired/stimulus`, `react`, `react-dom/client`, `htm`) for what the host page's import map provides. Rows keep one fixed height.
+`js/` ships in the gem: plain ES modules, no build step, relative imports inside the directory, and bare names (`@hotwired/stimulus`, `react`, `react-dom/client`) for what the host page's import map provides. Rows keep one fixed height.
 
 ## Docs
 

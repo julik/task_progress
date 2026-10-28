@@ -66,6 +66,16 @@ class TaskProgress
     #: (String) -> String
     def self.control_key(key) = "#{key}:control"
 
+    # Whether a cancel request is for one of these runs. A request names the run it was sent to -
+    # the one its sender saw writing the tree; one from a parent's control pipe names none
+    #: (String, *String?) -> bool
+    def self.for_run?(line, *runs)
+      named = JSON.parse(line)["run"] if line.start_with?("{")
+      named.nil? || runs.include?(named)
+    rescue JSON::ParserError
+      false
+    end
+
     # The key that names the run writing the tree now
     #: (String) -> String
     def self.run_key(key) = "#{key}:run"
@@ -200,23 +210,13 @@ class TaskProgress
           next replaced unless alive
           @stream.read(StreamOutput.control_key(@key), after:).each do |id, line|
             after = id
-            root.take_cancel_request(line) if for_this_run?(line, run)
+            root.take_cancel_request(line) if StreamOutput.for_run?(line, run, @took_over)
           end
         rescue => e
           log.on_error.call(e, self)
         end
         @stop.pop(timeout: every)
       end
-    end
-
-    # A request names the run it was sent to - the one its sender saw writing the tree. Ones from
-    # before runs were named, and from a parent's control pipe, name none
-    #: (String, String) -> bool
-    def for_this_run?(line, run)
-      named = JSON.parse(line)["run"] if line.start_with?("{")
-      named.nil? || named == run || named == @took_over
-    rescue JSON::ParserError
-      false
     end
   end
 end

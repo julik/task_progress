@@ -11,6 +11,17 @@ class TaskProgress
     # The browser client, as it is - an asset pipeline would fingerprint the file you import, and
     # leave the relative imports inside it pointing at names it does not serve
     config.task_progress.js_path = "/task_progress/js"
+    # Where pages get handed-off trees from, by the links TaskProgress.for_page hands out
+    config.task_progress.trees_path = "/task_progress/trees"
+    # Where handed-off trees are kept - a TaskProgress::RedisStreamStore, say. Unset, see TaskProgress.stream_store
+    config.task_progress.stream_store = nil
+
+    initializer "task_progress.config" do |app|
+      TaskProgress.stream_store = app.config.task_progress.stream_store if app.config.task_progress.stream_store
+      TaskProgress.trees_path = app.config.task_progress.trees_path if app.config.task_progress.trees_path
+    end
+
+    config.after_initialize { TaskProgress.tokens = TaskProgress::RailsDefaults.tokens }
 
     initializer "task_progress.jobs" do
       ActiveSupport.on_load(:active_job) { TaskProgress::JobSerializer.install }
@@ -29,6 +40,12 @@ class TaskProgress
       if path
         app.routes.append do
           mount TaskProgress::CancellationsApp.new(store: Rails.cache, tokens: TaskProgress::RailsDefaults.tokens) => path
+        end
+      end
+      trees = app.config.task_progress.trees_path
+      if trees
+        app.routes.append do
+          mount TaskProgress::TreesApp.new(tokens: TaskProgress::RailsDefaults.tokens) => trees
         end
       end
       js = app.config.task_progress.js_path

@@ -1,6 +1,7 @@
 require_relative "test_helper"
 require "open3"
 require "rbconfig"
+require "json"
 
 class AutoloadTest < Minitest::Test
   LIB = File.expand_path("../lib", __dir__)
@@ -37,7 +38,7 @@ class AutoloadTest < Minitest::Test
   def test_the_heavy_parts_load_with_the_classes_that_use_them
     out = ruby(<<~RUBY)
       require "task_progress"
-      TaskProgress::CancelToken
+      TaskProgress::Token
       p [defined?(OpenSSL), defined?(JSON)]
       TaskProgress::Wire
       p defined?(JSON)
@@ -70,7 +71,7 @@ class AutoloadTest < Minitest::Test
     names = out.lines.grep(/ (ok|failed)$/).map { it.split.first.to_sym }
     expected = %i[VERSION Event OPS Batch State Node Journal Wire Log Transaction Branch Mount Squasher
       SummaryOutput NDJSONOutput PublishingOutput BufferedOutput RactorOutput TerminalOutput ExecutionLogOutput
-      SSE CancelToken TrackedIO RACTORS Canceled]
+      SSE Token TrackedIO RACTORS Canceled]
     assert_empty expected - names, out
     refute_match(/failed/, out)
   end
@@ -83,5 +84,10 @@ class AutoloadTest < Minitest::Test
       p [defined?(JSON), defined?(OpenSSL)]
     RUBY
     assert_equal %([:TrackedIO, :JobSerializer]\n["constant", "constant"]\n), out, "TrackedIO and JobSerializer stay unloaded without their gems"
+  end
+
+  def test_the_npm_package_is_the_gems_version
+    package = JSON.parse(File.read(File.expand_path("../js/package.json", __dir__)))
+    assert_equal TaskProgress::VERSION, package["version"], "js/package.json and lib/task_progress/version.rb go up together"
   end
 end

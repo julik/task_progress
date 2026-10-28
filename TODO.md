@@ -15,6 +15,6 @@ Tasks a browser runs can be grafted onto the tree it shows (`LocalTasks`, `TaskT
 
 - **Rate limits.** Per job, per session and per address: batches a second, ops a batch, bytes a second. The browser should send at most every few hundred milliseconds, squashed, the way BufferedOutput does - and the server must enforce that rather than trust it.
 - **Size limits.** Tasks per graft, depth, name and message lengths - tighter than what Wire accepts from a trusted child process.
-- **Who may graft, and where.** A signed token like CancelToken's, and a task the server opened as `graftable: true`; nothing grafts anywhere else.
+- **Who may graft, and where.** A signed token like Token's, and a task the server opened as `graftable: true`; nothing grafts anywhere else.
 - **Abandoned grafts.** A tab that closes leaves a mount nobody feeds. It needs a heartbeat, and a timeout after which the server cancels the graft.
 - **Memory.** Every graft is a Mount and a subtree held by the server for the life of the job; there has to be a cap on how many a job takes.

@@ -21,10 +21,12 @@ class TaskProgress
     # @rbs @counter: Integer
     # @rbs @lock: Thread::Mutex
     # @rbs @appended: Thread::ConditionVariable
+    # @rbs @namespace: String?
 
-    # An empty stream
-    #: () -> void
-    def initialize
+    # An empty store. With a `namespace`, its keys go under it - see RedisStreamStore
+    #: (?namespace: String?) -> void
+    def initialize(namespace: nil)
+      @namespace = namespace
       @entries = {}
       @values = {}
       @expiries = {}
@@ -36,6 +38,7 @@ class TaskProgress
     # Adds `data` at the end of the stream at `key`, and returns its id
     #: (String, String) -> String
     def append(key, data)
+      key = ns(key)
       @lock.synchronize do
         expire_locked(key)
         id = @counter += 1
@@ -49,6 +52,7 @@ class TaskProgress
     # a `timeout`, waits up to that many seconds for one to come when there are none yet
     #: (String, ?after: String?, ?timeout: (Integer | Float)?) -> Array[[String, String]]
     def read(key, after: nil, timeout: nil)
+      key = ns(key)
       floor = after.to_i
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout if timeout
       @lock.synchronize do
@@ -65,11 +69,12 @@ class TaskProgress
 
     # The value at `key`, or nil
     #: (String) -> String?
-    def get(key) = @lock.synchronize { expire_locked(key) || @values[key] }
+    def get(key) = ns(key).then { |key| @lock.synchronize { expire_locked(key) || @values[key] } }
 
     # Keeps `value` at `key`, for `expires_in` seconds if given
     #: (String, String, ?expires_in: (Integer | Float)?, ?guard: [String, String]?) -> bool
     def set(key, value, expires_in: nil, guard: nil)
+      key = ns(key)
       guarded(guard) do
         @values[key] = value
         expires_in ? @expiries[key] = now + expires_in : @expiries.delete(key)
@@ -79,12 +84,14 @@ class TaskProgress
     # Forgets the streams and values at these keys
     #: (*String, ?guard: [String, String]?) -> bool
     def delete(*keys, guard: nil)
+      keys = keys.map { ns(it) }
       guarded(guard) { keys.each { forget(it) } }
     end
 
     # Drops the entries before the id `before`
     #: (String, before: String, ?guard: [String, String]?) -> bool
     def trim(key, before:, guard: nil)
+      key = ns(key)
       floor = before.to_i
       guarded(guard) { @entries[key]&.reject! { |id, _| id < floor } }
     end
@@ -92,6 +99,7 @@ class TaskProgress
     # Forgets what is at `key` - a stream or a value - `seconds` from now
     #: (String, Integer | Float, ?guard: [String, String]?) -> bool
     def expire(key, seconds, guard: nil)
+      key = ns(key)
       guarded(guard) { @expiries[key] = now + seconds if @entries.key?(key) || @values.key?(key) }
     end
 
@@ -102,13 +110,16 @@ class TaskProgress
     def guarded(guard)
       @lock.synchronize do
         if guard
-          expire_locked(guard[0])
-          next false unless @values[guard[0]] == guard[1]
+          expire_locked(ns(guard[0]))
+          next false unless @values[ns(guard[0])] == guard[1]
         end
         yield
         true
       end
     end
+
+    #: (String) -> String
+    def ns(key) = @namespace ? "#{@namespace}:#{key}" : key
 
     #: () -> Float
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)

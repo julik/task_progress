@@ -47,7 +47,8 @@ class TaskProgress
   autoload :TerminalOutput, "#{PARTS}/terminal_output"
   autoload :ExecutionLogOutput, "#{PARTS}/execution_log_output"
   autoload :SSE, "#{PARTS}/sse"
-  autoload :CancelToken, "#{PARTS}/cancel_token"
+  autoload :Token, "#{PARTS}/token"
+  autoload :TreesApp, "#{PARTS}/trees_app"
   autoload :TrackedIO, "#{PARTS}/tracked_io"
   autoload :HTMLRenderer, "#{PARTS}/html_renderer"
   autoload :TurboStreamOutput, "#{PARTS}/turbo_stream_output"
@@ -193,8 +194,8 @@ class TaskProgress
   # In Rails, the target is a record, and the rest comes from RailsDefaults: Turbo::StreamsChannel,
   # Rails.cache and the route the Railtie adds. Outside Rails the target is the element's id, and
   # `to:` - called with each frame - is up to you
-  #: (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) -> TaskProgress
-  #: [T] (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: CancelToken?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) { (TaskProgress) -> T } -> T?
+  #: (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: Token?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) -> TaskProgress
+  #: [T] (untyped, ?String, ?to: (^(String) -> void)?, ?store: TurboStreamOutput::_Store?, ?tokens: Token?, ?cancel_url: String?, ?renderer: TurboStreamOutput::_Renderer?, ?interval: Integer | Float, ?poll: Integer | Float, **untyped) { (TaskProgress) -> T } -> T?
   def self.broadcast(target, name = File.basename($PROGRAM_NAME), to: nil, store: nil, tokens: nil, cancel_url: nil, renderer: nil,
     interval: 0.25, poll: 1, **attributes, &block)
     defaults = RailsDefaults.for(target)
@@ -247,17 +248,74 @@ class TaskProgress
   @stream_store_lock = Mutex.new #: Thread::Mutex
 
   # Where handed-off trees are kept, unless a call says otherwise - one connection, as
-  # `Rails.cache` is, and every tree in it a stream of its own under its own key. Until it is set,
-  # a MemoryStreamStore, for this process alone; set it to something every process can reach
+  # `Rails.cache` is, and every tree in it a stream of its own under its own key.
   #
   #     TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
+  #
+  # Until it is set, a MemoryStreamStore: trees kept in this process alone, which is right for
+  # development and tests and quietly wrong anywhere a job runs in another process. So in
+  # production (RAILS_ENV, RACK_ENV or APP_ENV) it raises instead - set it to a MemoryStreamStore
+  # yourself if this process alone is what you mean
   #: () -> untyped
-  def self.stream_store = @stream_store || @stream_store_lock.synchronize { @stream_store ||= MemoryStreamStore.new }
+  def self.stream_store
+    @stream_store || @stream_store_lock.synchronize do
+      @stream_store ||= begin
+        if %w[RAILS_ENV RACK_ENV APP_ENV].any? { ENV[it] == "production" }
+          raise "TaskProgress.stream_store is not set. In production a handed-off tree has to be somewhere every " \
+            "process can reach it - set it to a TaskProgress::RedisStreamStore, or to a MemoryStreamStore " \
+            "if this process alone is what you mean"
+        end
+        MemoryStreamStore.new
+      end
+    end
+  end
 
   # Sets where handed-off trees are kept, see `stream_store`
   #: (untyped) -> void
   def self.stream_store=(store)
     @stream_store = store
+  end
+
+  @tokens = nil #: Token?
+  @trees_path = "/task_progress/trees" #: String
+
+  # Sets what signs the links `for_page` hands out. In Rails, the Railtie sets the app's own,
+  # made from its `secret_key_base`
+  #: (Token?) -> void
+  def self.tokens=(tokens)
+    @tokens = tokens
+  end
+
+  # Where TreesApp is mounted, for `for_page` to link to - `/task_progress/trees` by default
+  #: () -> String
+  def self.trees_path = @trees_path
+
+  # Sets where TreesApp is mounted
+  #: (String) -> void
+  def self.trees_path=(path)
+    @trees_path = path
+  end
+
+  # What signs the links `for_page` hands out - see `tokens=`
+  #: () -> Token
+  def self.tokens = @tokens || raise("Set TaskProgress.tokens = TaskProgress::Token.new(secret) - in Rails, the Railtie does")
+
+  # Everything a page needs to show a handed-off tree, as plain JSON-ready data - a prop for an
+  # Inertia or React page, a data attribute for Stimulus:
+  #
+  #     render inertia: "Videos/Show", props: {progress: TaskProgress.for_page(video.progress_key)}
+  #     # => {events: "/task_progress/trees/…/events", poll: "…/poll", cancel: "…/cancellations",
+  #     #     snapshot: {v: 1, …}}
+  #
+  # The links carry a Token good for `expires_in` seconds, not the tree's key: hand this out only
+  # where the page may see that tree. `snapshot` is the tree as it stands, so the page draws it
+  # before anything has come down the stream. TreesApp answers the links
+  #: (String | TaskProgress, ?expires_in: Integer, ?stream_store: untyped) -> Hash[Symbol, untyped]
+  def self.for_page(key, expires_in: 3600, stream_store: self.stream_store)
+    key = key.key || raise(ArgumentError, "#{key.inspect} was not handed off") if key.is_a?(TaskProgress)
+    base = "#{trees_path}/#{tokens.issue(key, expires_in:)}"
+    tree = fetch(key, stream_store:)
+    {events: "#{base}/events", poll: "#{base}/poll", cancel: "#{base}/cancellations", snapshot: Wire.to_h(tree.log.squashed)}
   end
 
   # A root to hand to whoever does the work - a job, a worker, another machine - which takes it
@@ -301,8 +359,12 @@ class TaskProgress
     root = new(handed.name, outputs: [output], log:, total: handed.total, expect: handed.expect,
       indeterminate: !!handed.indeterminate, unit: handed.unit, cancelable: !!handed.cancelable)
     root.send(:meta, attempt: handed.attempt.to_i + 1)
-    # Called off before anyone took it up: it stays called off, and `run` will not start its work
+    # Called off before anyone took it up - by the side that handed it off, or by a request that
+    # waited for a worker: it stays called off, and `run` will not start its work
     root.cancel!(handed.message) if handed.status == :canceled
+    stream_store.read(StreamOutput.control_key(key)).each do |_, line|
+      root.take_cancel_request(line) if StreamOutput.for_run?(line, snapshot.log.to_s)
+    end
     return root unless block
     begin
       root.run { block.call(it) }

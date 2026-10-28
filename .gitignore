@@ -6,3 +6,5 @@
 .DS_Store
 node_modules/
 /doc/
+test/types/node_modules
+test/types/package-lock.json

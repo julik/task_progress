@@ -14,7 +14,11 @@ class TaskProgress
   # follows trees a client of its own.
   #
   # A write with a `guard:` - a key and the value it must hold - runs as a Lua script, so the
-  # check and the write are one step, see MemoryStreamStore
+  # check and the write are one step, see MemoryStreamStore.
+  #
+  # Every tree is under its own key already, so two users' trees never meet. A `namespace` puts
+  # all the keys under it as well - `tenant-42:task_progress:{...}` - for apps, or tenants, that
+  # share a Redis and must stay apart even so
   class RedisStreamStore
     # The guarded writes. KEYS[1] is the guard, ARGV[1] the value it must hold
     GUARDED = {
@@ -26,21 +30,24 @@ class TaskProgress
     }.freeze #: Hash[Symbol, String]
 
     # @rbs @redis: untyped
+    # @rbs @namespace: String?
 
     # For a redis-client connection or pool, or a redis-rb client
-    #: (untyped) -> void
-    def initialize(redis)
+    #: (untyped, ?namespace: String?) -> void
+    def initialize(redis, namespace: nil)
       @redis = redis
+      @namespace = namespace
     end
 
     # Adds `data` at the end of the stream at `key`, and returns its id
     #: (String, String) -> String
-    def append(key, data) = @redis.call("XADD", key, "*", "d", data).to_s
+    def append(key, data) = @redis.call("XADD", ns(key), "*", "d", data).to_s
 
     # The entries after the id `after` - all of them when it is nil - as `[id, data]` pairs. With
     # a `timeout`, waits up to that many seconds for one to come when there are none yet
     #: (String, ?after: String?, ?timeout: (Integer | Float)?) -> Array[[String, String]]
     def read(key, after: nil, timeout: nil)
+      key = ns(key)
       after ||= "0-0"
       ms = (timeout * 1000).ceil if timeout&.positive?
       reply = if ms.nil?
@@ -56,11 +63,12 @@ class TaskProgress
 
     # The value at `key`, or nil
     #: (String) -> String?
-    def get(key) = @redis.call("GET", key)
+    def get(key) = @redis.call("GET", ns(key))
 
     # Keeps `value` at `key`, for `expires_in` seconds if given
     #: (String, String, ?expires_in: (Integer | Float)?, ?guard: [String, String]?) -> bool
     def set(key, value, expires_in: nil, guard: nil)
+      key = ns(key)
       ms = (expires_in * 1000).ceil if expires_in
       return guarded(:set, guard, [key], [value, ms.to_s]) if guard
       ms ? @redis.call("SET", key, value, "PX", ms) : @redis.call("SET", key, value)
@@ -70,6 +78,7 @@ class TaskProgress
     # Forgets the streams and values at these keys
     #: (*String, ?guard: [String, String]?) -> bool
     def delete(*keys, guard: nil)
+      keys = keys.map { ns(it) }
       return true if keys.empty?
       return guarded(:delete, guard, keys, []) if guard
       @redis.call("DEL", *keys)
@@ -79,6 +88,7 @@ class TaskProgress
     # Drops the entries before the id `before`
     #: (String, before: String, ?guard: [String, String]?) -> bool
     def trim(key, before:, guard: nil)
+      key = ns(key)
       return guarded(:trim, guard, [key], [before]) if guard
       @redis.call("XTRIM", key, "MINID", before)
       true
@@ -87,6 +97,7 @@ class TaskProgress
     # Forgets what is at `key` - a stream or a value - `seconds` from now
     #: (String, Integer | Float, ?guard: [String, String]?) -> bool
     def expire(key, seconds, guard: nil)
+      key = ns(key)
       ms = (seconds * 1000).ceil
       return guarded(:expire, guard, [key], [ms.to_s]) if guard
       @redis.call("PEXPIRE", key, ms)
@@ -97,8 +108,11 @@ class TaskProgress
 
     #: (Symbol, [String, String], Array[String], Array[String]) -> bool
     def guarded(script, guard, keys, args)
-      @redis.call("EVAL", GUARDED.fetch(script), keys.length + 1, guard[0], *keys, guard[1], *args).to_i == 1
+      @redis.call("EVAL", GUARDED.fetch(script), keys.length + 1, ns(guard[0]), *keys, guard[1], *args).to_i == 1
     end
+
+    #: (String) -> String
+    def ns(key) = @namespace ? "#{@namespace}:#{key}" : key
 
     # XREAD answers in one of three shapes - RESP3 a Hash, RESP2 nested Arrays, redis-rb a Hash
     # of Hashes - and nil when nothing came

@@ -4,6 +4,7 @@
 //
 //   followEventSourceAt(url, onChange)   a TaskProgress::SSE stream, drawn at most once a frame
 //   followPollingAt(url, onChange)       a TaskProgress::Poll endpoint, for where SSE does not get through
+//   followProgress(progress, onChange)   what TaskProgress.for_page hands a page - SSE, or polling if that fails
 //   batchFeed(onChange)              the same, for batches you get some other way
 //   tree.graft(path, localTasks)         draws tasks running in this browser under a server task
 
@@ -292,30 +293,70 @@ const ended = (tree) => tree.seq != null && (!tree.root || FINISHED.has(tree.roo
 // onChange(tree, changes) at most once a frame with what they changed, see render_queue.js.
 // `push` returns what the tree made of the batch: on a "gap" it is for the caller to start
 // over, by fetching a fresh squash (a batch with prev 0)
-export function batchFeed(onChange, { schedule, clock } = {}) {
+// `initial` is a batch to start from - the snapshot a page was rendered with, say - so the tree
+// is drawn before anything has come in
+export function batchFeed(onChange, { schedule, clock, initial } = {}) {
   const tree = new TaskTree(clock ? { clock } : {})
   const queue = new RenderQueue(tree, onChange, { schedule })
+  if (initial) queue.apply(initial)
   return { tree, push: (batch) => queue.apply(batch), close: () => queue.close() }
 }
 
 // Follows a TaskProgress::SSE stream at `url`, see batchFeed. On a gap it reconnects, and
 // the server starts it over from a fresh squash. It stops once the root has finished
-export function followEventSourceAt(url, onChange, options = {}) {
+//
+// `onUnreachable` is called, once, when nothing has come within `unreachableAfter` seconds of
+// connecting, or the connection failed before anything did - a proxy that buffers, a host that
+// cuts long responses. followProgress falls back to polling on it
+export function followEventSourceAt(url, onChange, { onUnreachable, unreachableAfter = 5, ...options } = {}) {
   const following = batchFeed(onChange, options)
   const { tree } = following
   let source
+  let heard = false
+  let timer = null
+  const unreachable = () => {
+    if (heard || !onUnreachable) return
+    heard = true // once
+    clearTimeout(timer)
+    onUnreachable()
+  }
   const connect = () => {
     source = new EventSource(url)
     source.addEventListener("batch", (event) => {
+      heard = true
+      clearTimeout(timer)
       if (following.push(JSON.parse(event.data)) === "gap") {
         source.close()
         connect()
       }
       if (ended(tree)) source.close()
     })
+    source.addEventListener("error", unreachable)
   }
   connect()
-  return { tree, close: () => { source.close(); following.close() } }
+  if (onUnreachable) timer = setTimeout(unreachable, unreachableAfter * 1000)
+  return { tree, close: () => { clearTimeout(timer); source.close(); following.close() } }
+}
+
+// Follows what TaskProgress.for_page hands a page - { events, poll, cancel, snapshot } - drawn
+// from its snapshot at once. `transport` is "sse", "poll", or "auto": SSE, falling back to
+// polling (every `poll` seconds, or long polling with `wait`) when the stream cannot be reached. `tree` is always the one being followed now
+export function followProgress(progress, onChange, { transport = "auto", poll = 1, wait = 0, ...options } = {}) {
+  const initial = progress.snapshot
+  const polling = (from) => followPollingAt(progress.poll, onChange, { poll, wait, ...options, initial: from })
+  if (transport === "poll" || !progress.events) return polling(initial)
+  let current = followEventSourceAt(progress.events, onChange, {
+    ...options,
+    initial,
+    onUnreachable: transport === "auto" ? () => {
+      current.close()
+      current = polling(initial)
+    } : undefined
+  })
+  return {
+    get tree() { return current.tree },
+    close: () => current.close()
+  }
 }
 
 // Polls a TaskProgress::Poll endpoint at `url`, see batchFeed - for where an EventSource does

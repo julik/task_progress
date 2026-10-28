@@ -113,6 +113,8 @@ module StreamBehaviour
       end
     end
     path = started.pop
+    # The worker sends its batches out every so often; asked before "Rows" got there, the answer is :moot
+    wait_for { TaskProgress.fetch(import.key, stream_store: @stream).find(path) }
     assert_equal :forwarded, TaskProgress.fetch(import.key, stream_store: @stream).request_cancel(path, "From a page")
     assert_equal :carried_on, worker.value, "the task was called off, and the job went on"
     wait_for { TaskProgress.fetch(import.key, stream_store: @stream).subtasks.first.canceled? }
@@ -243,6 +245,13 @@ module StreamBehaviour
     root&.log&.close
   end
 
+  def test_a_namespace_keeps_trees_apart_in_one_store
+    tenant = @stream.class.new(*(@redis ? [@redis] : []), namespace: "tenant-42")
+    import = TaskProgress.handoff("Theirs", stream_store: tenant)
+    assert_equal "Theirs", TaskProgress.fetch(import.key, stream_store: tenant).name
+    assert_raises(KeyError, "the same key, outside the namespace, is nothing") { TaskProgress.fetch(import.key, stream_store: @stream) }
+  end
+
   def test_a_live_tree_can_mount_one_handed_off
     parent = TaskProgress.new("Nightly")
     part = TaskProgress.handoff("Part 1", stream_store: @stream)
@@ -310,6 +319,17 @@ class MemoryStreamTest < Minitest::Test
     assert_equal "Defaulted", TaskProgress.fetch(import.key).name
   end
 
+  def test_production_will_not_keep_trees_in_one_process_unasked
+    stored = TaskProgress.instance_variable_get(:@stream_store)
+    TaskProgress.stream_store = nil
+    ENV["RACK_ENV"], before = "production", ENV["RACK_ENV"]
+    error = assert_raises(RuntimeError) { TaskProgress.handoff("Lost") }
+    assert_match(/stream_store is not set/, error.message)
+  ensure
+    ENV["RACK_ENV"] = before
+    TaskProgress.stream_store = stored
+  end
+
   def test_nothing_handed_off_cannot_be_adopted
     assert_raises(KeyError) { TaskProgress.adopt("task_progress:{nothing}", stream_store: @stream) }
     assert_raises(KeyError) { TaskProgress.fetch("task_progress:{nothing}", stream_store: @stream) }
@@ -324,6 +344,7 @@ class RedisStreamTest < Minitest::Test
     require "redis-client"
     client = RedisClient.config(url: ENV.fetch("REDIS_URL", "redis://localhost:6379/15")).new_pool(size: 8)
     client.call("PING")
+    @redis = client
     @stream = TaskProgress::RedisStreamStore.new(client)
   rescue LoadError, RedisClient::CannotConnectError
     skip "there is no Redis to talk to"

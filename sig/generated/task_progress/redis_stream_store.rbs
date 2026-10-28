@@ -13,16 +13,22 @@ class TaskProgress
   # follows trees a client of its own.
   #
   # A write with a `guard:` - a key and the value it must hold - runs as a Lua script, so the
-  # check and the write are one step, see MemoryStreamStore
+  # check and the write are one step, see MemoryStreamStore.
+  #
+  # Every tree is under its own key already, so two users' trees never meet. A `namespace` puts
+  # all the keys under it as well - `tenant-42:task_progress:{...}` - for apps, or tenants, that
+  # share a Redis and must stay apart even so
   class RedisStreamStore
     # The guarded writes. KEYS[1] is the guard, ARGV[1] the value it must hold
     GUARDED: Hash[Symbol, String]
 
     @redis: untyped
 
+    @namespace: String?
+
     # For a redis-client connection or pool, or a redis-rb client
-    # : (untyped) -> void
-    def initialize: (untyped) -> void
+    # : (untyped, ?namespace: String?) -> void
+    def initialize: (untyped, ?namespace: String?) -> void
 
     # Adds `data` at the end of the stream at `key`, and returns its id
     # : (String, String) -> String
@@ -57,6 +63,9 @@ class TaskProgress
 
     # : (Symbol, [String, String], Array[String], Array[String]) -> bool
     def guarded: (Symbol, [ String, String ], Array[String], Array[String]) -> bool
+
+    # : (String) -> String
+    def ns: (String) -> String
 
     # XREAD answers in one of three shapes - RESP3 a Hash, RESP2 nested Arrays, redis-rb a Hash
     # of Hashes - and nil when nothing came

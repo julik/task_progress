@@ -17,6 +17,7 @@ Everything TaskProgress does, and how. The [README](README.md) is the short vers
 - [Canceling from outside](#canceling-from-outside)
 - [Server-Sent Events](#server-sent-events)
 - [Polling](#polling)
+- [A handed-off tree on a page](#a-handed-off-tree-on-a-page)
 - [The browser client](#the-browser-client)
 - [Turbo](#turbo)
 - [Big trees](#big-trees)
@@ -36,7 +37,7 @@ A task is named by its **path** from the root: `[]` is the root, `["x3k0", "00af
 
 Timestamps are for display only. Order is `seq`, `prev`, the order of events in a batch, and the order children were opened in.
 
-`require "task_progress"` loads one file. Each class loads when it is first used, and brings what it needs from the standard library with it - `json` comes with `Wire` and `Mount`, `openssl` with `CancelToken` - so a program that only keeps a tree in memory never loads either. `TaskProgress.eager_load!` loads everything at once, for a server that forks its workers and wants them to share the code; `TrackedIO` is skipped when `progressive_io` is not installed.
+`require "task_progress"` loads one file. Each class loads when it is first used, and brings what it needs from the standard library with it - `json` comes with `Wire` and `Mount`, `openssl` with `Token` - so a program that only keeps a tree in memory never loads either. `TaskProgress.eager_load!` loads everything at once, for a server that forks its workers and wants them to share the code; `TrackedIO` is skipped when `progressive_io` is not installed.
 
 ## Tasks
 
@@ -299,7 +300,7 @@ TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.confi
 
 The stream store is where handed-off trees are kept: one connection, set once, the way `Rails.cache` is - and every tree in it a stream of its own, under a key of its own, which nothing else reads or writes. Two users' imports share a Redis and a connection pool, and nothing more. Any call that touches it takes `stream_store:`, for a tree, a tenant or a test kept somewhere else.
 
-Until it is set, `TaskProgress.stream_store` is a `MemoryStreamStore` - good for one process (the tests, the bench, an app that runs its jobs in the process that serves its pages) and for nothing else. `RedisStreamStore` takes a [redis-client](https://github.com/redis-rb/redis-client) connection or pool, or a redis-rb `Redis`; neither is a dependency, and nothing loads one. It needs Redis 6.2 or later. A follower waiting for news holds its connection while it waits, so size the pool for the followers you expect at once; a redis-rb `Redis` is a single connection, which a follower would block for everything else.
+Until it is set, `TaskProgress.stream_store` is a `MemoryStreamStore` - good for one process (the tests, the bench, an app that runs its jobs in the process that serves its pages) and for nothing else. In production (`RAILS_ENV`, `RACK_ENV` or `APP_ENV`) an unset one raises rather than quietly keep trees where no other process can see them; set a `MemoryStreamStore` yourself if that is what you mean. In Rails, `config.task_progress.stream_store` sets it too. `RedisStreamStore` takes a [redis-client](https://github.com/redis-rb/redis-client) connection or pool, or a redis-rb `Redis`; neither is a dependency, and nothing loads one. It needs Redis 6.2 or later. A follower waiting for news holds its connection while it waits, so size the pool for the followers you expect at once; a redis-rb `Redis` is a single connection, which a follower would block for everything else.
 
 Under one key, `StreamOutput` keeps:
 
@@ -310,7 +311,7 @@ Under one key, `StreamOutput` keeps:
 | `…:beat` | There while the worker is alive, gone a few seconds after it is not. |
 | `…:control` | Cancel requests, the other way. |
 
-The braces make the id a Redis Cluster hash tag, so all four land on one node. A snapshot is taken at the first batch, every two seconds after and when the root finishes, and each one trims the stream back to the one before - so however spammy the work, the stream stays a couple of seconds long. Once the root has finished, it all expires after a day (`retain:`). A worker sends its batches squashed, ten times a second at most (`interval:`).
+The braces make the id a Redis Cluster hash tag, so all five land on one node. `RedisStreamStore.new(redis, namespace: "tenant-42")` puts every key under a namespace as well, for apps or tenants that share a Redis and must stay apart even so. A snapshot is taken at the first batch, every two seconds after and when the root finishes, and each one trims the stream back to the one before - so however spammy the work, the stream stays a couple of seconds long. Once the root has finished, it all expires after a day (`retain:`). A worker sends its batches squashed, ten times a second at most (`interval:`).
 
 Another kind of stream store is anything with `append(key, data) -> id`, `read(key, after:, timeout:) -> [[id, data]]`, `get`, `set(key, value, expires_in:)`, `delete`, `trim(key, before:)` and `expire(key, seconds)`.
 
@@ -459,7 +460,7 @@ It decides in one transaction against the tree as it stands, so it cannot race t
 Only `cancelable` tasks can be asked for. Sign the right to ask, so a cancel cannot be forged or replayed:
 
 ```ruby
-tokens = TaskProgress::CancelToken.new(ENV.fetch("TASK_PROGRESS_SECRET"))  # 32 bytes or more
+tokens = TaskProgress::Token.new(ENV.fetch("TASK_PROGRESS_SECRET"))  # 32 bytes or more
 token = tokens.issue(root.log.id, expires_in: 3600)  # into the page, next to the stream URL
 tokens.verify(params[:token])                         # => what it was issued for, or nil
 ```
@@ -512,6 +513,29 @@ followPollingAt("/jobs/42/poll", draw, { wait: 25 })                          //
 
 Everything is in seconds. A poll that fails is tried again later and later, up to half a minute apart; long polls go out a quarter of a second apart at the least. Polling stops once the root has finished, or the task is gone. The Stimulus controller polls given a `poll` value (seconds between polls) or a `wait` value (to long-poll); `TaskTreeView` and `useTaskTree` take `poll` and `wait` too.
 
+## A handed-off tree on a page
+
+```ruby
+TaskProgress.for_page(video.progress_key)
+# => {events: "/task_progress/trees/eyJ…/events", poll: "…/poll", cancel: "…/cancellations",
+#     snapshot: {v: 1, log: …, prev: 0, seq: …, ops: […]}}
+```
+
+Everything a page needs to show a handed-off tree, as JSON-ready data: a prop for an Inertia or React page, `data-task-tree-progress-value` for the Stimulus controller, `useTaskTree(progress)` / `<TaskTreeView progress>` / `followProgress(progress, draw)` in the browser. `snapshot` is the tree as it stands, so the page draws it before anything comes down the stream. The client follows it over Server-Sent Events, and falls back to polling by itself when those cannot be reached - an error, or nothing at all for five seconds, as from a proxy that buffers.
+
+**The tree's key never reaches the page.** The links carry a `Token` - an HMAC over the key and an expiry (`expires_in:`, an hour) - and `TreesApp` answers them:
+
+```
+GET  /task_progress/trees/:token/events          Server-Sent Events
+GET  /task_progress/trees/:token/poll            polled or long-polled
+POST /task_progress/trees/:token/cancellations   path=x3k0-00af
+  202 requested   200 moot   409 not cancelable   403 a bad token   404 no such tree
+```
+
+Issuing the token is the authorization: call `for_page` where you have decided the page may see the tree, as you would before rendering anything else of the record's. The Railtie mounts `TreesApp` (`config.task_progress.trees_path`, nil for none) and signs with the app's `secret_key_base`. Outside Rails, mount it yourself and set `TaskProgress.tokens = TaskProgress::Token.new(secret)` and, if it is not at `/task_progress/trees`, `TaskProgress.trees_path`.
+
+A cancel asked of a tree no worker has taken up yet waits for one, which takes it up before it begins the work - so the work never starts.
+
 ## The browser client
 
 Plain ES modules in `js/`, shipped with the gem: `TaskProgress.js_path`. Serve the directory under any prefix - imports inside it are relative. With [Assiette](https://github.com/julik/assiette):
@@ -520,7 +544,7 @@ Plain ES modules in `js/`, shipped with the gem: `TaskProgress.js_path`. Serve t
 use Assiette::Server, root: "public", additional_directory_mappings: {"/task_progress" => TaskProgress.js_path}
 ```
 
-The Stimulus controller and the React component import `@hotwired/stimulus`, `react`, `react-dom/client` and `htm` by bare name, so the page's import map provides them.
+The Stimulus controller and the React component import `@hotwired/stimulus`, `react` and `react-dom/client` by bare name - from `node_modules` in a Vite app, from the import map on a page without a build step. There is no JSX in them.
 
 ### task_tree.js
 
@@ -672,7 +696,7 @@ Then put `task_tree.css` on the page, and import `task_progress_clock.js` for el
 - **Every frame is the whole tree**, drawn by HTMLRenderer and sent as `<turbo-stream action="replace" method="morph">`, at most every `interval:` seconds (0.25) however spammy the job is. A Turbo Stream has no seq and no gaps to notice; a page that missed a frame, or joined late, is set right by the next one. Morphing changes only what differs, so a bar eases to its new width.
 - **The last frame is kept in `Rails.cache`**, under `task_progress/<dom_id>`, for the helper to draw before the first broadcast arrives.
 - **The stream is `[record, :task_progress]`**, and the tree's element has the id `dom_id(record, :task_progress)`.
-- **Cancel buttons are plain forms.** A cancelable task's button posts its path and a signed token (CancelToken, keyed off the app's `secret_key_base`) to `/task_progress/cancellations`, a route the Railtie adds. The job is in another process, so the route cannot cancel it: it leaves the request in `Rails.cache`, where the job looks for it every `poll:` seconds (1) and decides, as it does for any request. Its next frame shows the cancel. Set `config.task_progress.cancellations_path` to put the route elsewhere, or to nil for none.
+- **Cancel buttons are plain forms.** A cancelable task's button posts its path and a signed token (Token, keyed off the app's `secret_key_base`) to `/task_progress/cancellations`, a route the Railtie adds. The job is in another process, so the route cannot cancel it: it leaves the request in `Rails.cache`, where the job looks for it every `poll:` seconds (1) and decides, as it does for any request. Its next frame shows the cancel. Set `config.task_progress.cancellations_path` to put the route elsewhere, or to nil for none.
 
 `to:`, `store:`, `tokens:`, `cancel_url:` and `renderer:` override what Rails would give; `interval:` and `poll:` are the seconds between frames, and between looks for cancel requests. With a block, `broadcast` runs it as the root's work and returns its value; without one it returns the root, finished at exit.
 

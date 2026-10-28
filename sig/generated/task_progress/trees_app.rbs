@@ -1,0 +1,40 @@
+# Generated from lib/task_progress/trees_app.rb with RBS::Inline
+
+class TaskProgress
+  # A Rack app that serves handed-off trees to pages, by a Token rather than by the tree's key -
+  # what TaskProgress.for_page hands out links to. The Railtie mounts it at `/task_progress/trees`.
+  #
+  #     GET  /:token/events          Server-Sent Events, see SSE
+  #     GET  /:token/poll            the tree, polled or long-polled, see Poll
+  #     POST /:token/cancellations   path=x3k0-00af (a form, or JSON)
+  #       202  {"path": ..., "state": "requested"}   asked of whoever works on it
+  #       200  {"path": ..., "state": "moot"}        nothing left to cancel - no such task, or it ended
+  #       409  the task is not cancelable
+  #     403  a token that is forged, mangled or expired
+  #     404  a tree that is gone, or anything else
+  #
+  # Issuing the token is the authorization: it happens in an action of yours, which has decided
+  # the page may see that tree. The key itself never leaves the server
+  class TreesApp
+    @tokens: Token
+
+    @stream_store: untyped
+
+    # Checks tokens with `tokens`, and reads trees from `stream_store` - TaskProgress.stream_store
+    # unless given
+    # : (tokens: Token, ?stream_store: untyped) -> void
+    def initialize: (tokens: Token, ?stream_store: untyped) -> void
+
+    # Serves one request
+    # : (Hash[String, untyped]) -> [Integer, Hash[String, String], untyped]
+    def call: (Hash[String, untyped]) -> [ Integer, Hash[String, String], untyped ]
+
+    private
+
+    # : (String, Hash[String, untyped], untyped) -> [Integer, Hash[String, String], Array[String]]
+    def cancel: (String, Hash[String, untyped], untyped) -> [ Integer, Hash[String, String], Array[String] ]
+
+    # : (Integer, Hash[Symbol, untyped]) -> [Integer, Hash[String, String], Array[String]]
+    def respond: (Integer, Hash[Symbol, untyped]) -> [ Integer, Hash[String, String], Array[String] ]
+  end
+end

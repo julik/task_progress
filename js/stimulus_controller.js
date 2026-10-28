@@ -1,8 +1,12 @@
 import { Controller } from "@hotwired/stimulus"
-import { followEventSourceAt, followPollingAt, requestCancel, pathKey } from "./task_tree.js"
+import { followEventSourceAt, followPollingAt, followProgress, requestCancel, pathKey } from "./task_tree.js"
 import { rowView, CANCEL_ICON } from "./row_view.js"
 
-// Draws the tree from a TaskProgress SSE stream. Point it somewhere with the url value:
+// Draws a tree. Give it what TaskProgress.for_page hands a page, as the progress value - it draws
+// the snapshot at once, follows the stream, falls back to polling where SSE does not get through,
+// and its cancel buttons ask where it says:
+//   <div data-controller="task-tree" data-task-tree-progress-value="<%= TaskProgress.for_page(key).to_json %>"></div>
+// Or point it at a TaskProgress SSE stream with the url value:
 //   <div data-controller="task-tree" data-task-tree-url-value="/jobs/abc/events"></div>
 // Changing the value follows the new stream instead. Where SSE does not get through, point it at
 // a TaskProgress::Poll endpoint and give it a poll value - seconds between polls - and a wait
@@ -17,23 +21,32 @@ import { rowView, CANCEL_ICON } from "./row_view.js"
 // url value changes - see TaskTree#graft. Reach the controller with
 // application.getControllerForElementAndIdentifier(element, "task-tree")
 export default class extends Controller {
-  static values = { url: String, cancelUrl: String, cancelToken: String, poll: Number, wait: Number }
+  static values = { url: String, progress: Object, cancelUrl: String, cancelToken: String, poll: Number, wait: Number }
 
-  urlValueChanged(url) {
+  urlValueChanged() { this.#follow() }
+
+  progressValueChanged() { this.#follow() }
+
+  #follow() {
     this.#stop()
     this.rows = new Map()
     this.keys = null
     this.element.replaceChildren()
-    if (!url) return
     const draw = (tree, changes) => this.render(tree, changes)
-    this.following = this.pollValue || this.waitValue
-      ? followPollingAt(url, draw, { poll: this.pollValue || 1, wait: this.waitValue })
-      : followEventSourceAt(url, draw)
+    const progress = this.progressValue
+    if (progress?.events || progress?.poll) {
+      const transport = this.pollValue || this.waitValue ? "poll" : "auto"
+      this.following = followProgress(progress, draw, { transport, poll: this.pollValue || 1, wait: this.waitValue })
+    } else if (this.urlValue) {
+      this.following = this.pollValue || this.waitValue
+        ? followPollingAt(this.urlValue, draw, { poll: this.pollValue || 1, wait: this.waitValue })
+        : followEventSourceAt(this.urlValue, draw)
+    }
   }
 
   // Stimulus does not tell a controller its values again when its element comes back - moved in
   // the page, or kept across visits with data-turbo-permanent - so it picks up where it was
-  connect() { if (this.urlValue && !this.following) this.urlValueChanged(this.urlValue) }
+  connect() { if (!this.following) this.#follow() }
 
   disconnect() { this.#stop() }
 
@@ -87,9 +100,10 @@ export default class extends Controller {
     const { defaultPrevented } = this.dispatch("cancel", { detail: { path: row.path, name: row.name }, cancelable: true })
     if (defaultPrevented) return
     if (row.local) return this.following?.tree.cancelLocal(row.path, "Canceled in this browser")
-    if (!this.cancelUrlValue) return
+    const url = this.progressValue?.cancel || this.cancelUrlValue
+    if (!url) return
     button.disabled = true // until the cancel comes down the stream, or the server says no
-    requestCancel(this.cancelUrlValue, row.path, { token: this.cancelTokenValue })
+    requestCancel(url, row.path, { token: this.cancelTokenValue || undefined })
       .then((response) => { if (!response.ok) button.disabled = false }, () => { button.disabled = false })
   }
 

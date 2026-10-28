@@ -17,10 +17,10 @@ class TaskProgress
     # How long a request waits for its run to take it up
     REQUEST_TTL = 600 #: Integer
     # @rbs @store: TurboStreamOutput::_Store
-    # @rbs @tokens: CancelToken
+    # @rbs @tokens: Token
 
     # Leaves requests in `store`, for tokens `tokens` issued
-    #: (store: TurboStreamOutput::_Store, tokens: CancelToken) -> void
+    #: (store: TurboStreamOutput::_Store, tokens: Token) -> void
     def initialize(store:, tokens:)
       @store = store
       @tokens = tokens
@@ -30,7 +30,7 @@ class TaskProgress
     #: (Hash[String, untyped]) -> [Integer, Hash[String, String], Array[String]]
     def call(env)
       return respond(405, {error: "POST a cancellation"}) unless env["REQUEST_METHOD"] == "POST"
-      params = params(env)
+      params = CancellationsApp.params(env)
       key = @tokens.verify(params["token"]&.to_s) or return respond(403, {error: "invalid or expired token"})
       path = params["path"].to_s.split("-")
       return respond(422, {error: "malformed path"}) unless path.length <= Wire::MAX_DEPTH && path.all? { it.match?(Wire::SEGMENT) }
@@ -44,10 +44,9 @@ class TaskProgress
     #: (String, path) -> String
     def self.request_key(key, path) = "#{key}/cancel/#{path.join("-")}"
 
-    private
-
+    # The request's parameters, from a form or JSON
     #: (Hash[String, untyped]) -> Hash[String, untyped]
-    def params(env)
+    def self.params(env) # :nodoc:
       # Mounted in Rails, a middleware (Rack::MethodOverride, looking for `_method`) has read a
       # form's body already - and left it parsed here
       form = env["rack.request.form_hash"]
@@ -68,6 +67,8 @@ class TaskProgress
     rescue ArgumentError
       {}
     end
+
+    private
 
     #: (Integer, Hash[Symbol, untyped]) -> [Integer, Hash[String, String], Array[String]]
     def respond(status, body) = [status, {"content-type" => "application/json"}, [JSON.generate(body)]]

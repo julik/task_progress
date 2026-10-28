@@ -4,15 +4,16 @@
 require "openssl"
 
 class TaskProgress
-  # Lets whoever was shown a tree cancel tasks in it, and nobody else. The server issues a token
-  # for a log when it hands out the page or the stream, and checks it when a cancellation comes
-  # back - so a cancel cannot be forged without the secret, or replayed after the token expires.
-  # It says nothing about which task: that is for `cancelable` to say.
+  # The right to see a tree and to ask for its tasks to be canceled, signed, and good for a while.
+  # The server issues one when it hands out a page - after it has decided the page may show that
+  # tree - and checks it when the page comes back for the tree or with a cancellation. So neither
+  # can be forged without the secret, or used after the token expires, and the tree's own key never
+  # has to reach a page. Which tasks may be canceled is for `cancelable` to say.
   #
-  #     tokens = TaskProgress::CancelToken.new(ENV.fetch("TASK_PROGRESS_SECRET"))
-  #     token = tokens.issue(root.log.id, expires_in: 3600)  # into the page, next to the stream URL
-  #     tokens.verify(params[:token]) == root.log.id         # when the cancellation comes in
-  class CancelToken
+  #     tokens = TaskProgress::Token.new(ENV.fetch("TASK_PROGRESS_SECRET"))
+  #     token = tokens.issue(import.key, expires_in: 3600)  # into the page
+  #     tokens.verify(token)                                # => import.key, when the page comes back
+  class Token
     # @rbs @secret: String
     # @rbs @clock: ^() -> Integer
 
@@ -46,7 +47,7 @@ class TaskProgress
     private
 
     #: (String) -> String
-    def sign(payload) = encode(OpenSSL::HMAC.digest("SHA256", @secret, "task_progress.cancel\n#{payload}"))
+    def sign(payload) = encode(OpenSSL::HMAC.digest("SHA256", @secret, "task_progress.token\n#{payload}"))
 
     #: (String) -> String
     def encode(bytes) = [bytes].pack("m0").tr("+/", "-_").delete("=")

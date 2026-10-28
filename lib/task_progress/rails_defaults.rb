@@ -29,9 +29,9 @@ class TaskProgress
       end
 
       # Tokens for the cancel buttons, signed with a key derived from the app's secret
-      #: () -> CancelToken
+      #: () -> Token
       def tokens
-        CancelToken.new(::Rails.application.key_generator.generate_key("task_progress cancellations")) # steep:ignore
+        Token.new(::Rails.application.key_generator.generate_key("task_progress cancellations")) # steep:ignore
       end
 
       # Where the cancel buttons post, or nil when the app has turned that off

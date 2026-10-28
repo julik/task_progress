@@ -89,7 +89,7 @@ class TurboTest < Minitest::Test
 
   def test_a_cancel_button_reaches_a_job_through_the_store
     store = TaskProgress::MemoryCache.new
-    tokens = TaskProgress::CancelToken.new("s" * 32)
+    tokens = TaskProgress::Token.new("s" * 32)
     app = TaskProgress::CancellationsApp.new(store:, tokens:)
     frames = Queue.new
     worker = Thread.new do
@@ -113,7 +113,7 @@ class TurboTest < Minitest::Test
 
   def test_a_cancel_that_came_too_late_does_not_reach_the_next_run
     store = TaskProgress::MemoryCache.new
-    tokens = TaskProgress::CancelToken.new("s" * 32)
+    tokens = TaskProgress::Token.new("s" * 32)
     app = TaskProgress::CancellationsApp.new(store:, tokens:)
     frames = []
     TaskProgress.broadcast("job-1", "Run 1", to: ->(html) { frames << html }, store:, tokens:, cancel_url: "/cancel", cancelable: true, poll: 0.01) { :done }
@@ -127,10 +127,10 @@ class TurboTest < Minitest::Test
   end
 
   def test_the_cancellations_app_turns_away_what_it_should
-    app = TaskProgress::CancellationsApp.new(store: TaskProgress::MemoryCache.new, tokens: TaskProgress::CancelToken.new("s" * 32))
-    token = TaskProgress::CancelToken.new("s" * 32).issue("task_progress/x")
+    app = TaskProgress::CancellationsApp.new(store: TaskProgress::MemoryCache.new, tokens: TaskProgress::Token.new("s" * 32))
+    token = TaskProgress::Token.new("s" * 32).issue("task_progress/x")
     assert_equal 403, app.call(env(path: "abcd", token: "forged")).first
-    assert_equal 403, app.call(env(path: "abcd", token: TaskProgress::CancelToken.new("t" * 32).issue("task_progress/x"))).first
+    assert_equal 403, app.call(env(path: "abcd", token: TaskProgress::Token.new("t" * 32).issue("task_progress/x"))).first
     assert_equal 422, app.call(env(path: "Not A Path", token:)).first
     assert_equal 405, app.call({"REQUEST_METHOD" => "GET"}).first
     status, _, body = app.call(env(path: "abcd", token:, json: true))

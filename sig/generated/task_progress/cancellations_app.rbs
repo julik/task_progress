@@ -15,11 +15,11 @@ class TaskProgress
 
     @store: TurboStreamOutput::_Store
 
-    @tokens: CancelToken
+    @tokens: Token
 
     # Leaves requests in `store`, for tokens `tokens` issued
-    # : (store: TurboStreamOutput::_Store, tokens: CancelToken) -> void
-    def initialize: (store: TurboStreamOutput::_Store, tokens: CancelToken) -> void
+    # : (store: TurboStreamOutput::_Store, tokens: Token) -> void
+    def initialize: (store: TurboStreamOutput::_Store, tokens: Token) -> void
 
     # Takes a POST with `path` - the task's ids joined with a dash - and `token`, as a form or JSON
     # : (Hash[String, untyped]) -> [Integer, Hash[String, String], Array[String]]
@@ -29,10 +29,11 @@ class TaskProgress
     # : (String, path) -> String
     def self.request_key: (String, path) -> String
 
-    private
-
+    # The request's parameters, from a form or JSON
     # : (Hash[String, untyped]) -> Hash[String, untyped]
-    def params: (Hash[String, untyped]) -> Hash[String, untyped]
+    def self.params: (Hash[String, untyped]) -> Hash[String, untyped]
+
+    private
 
     # : (Integer, Hash[Symbol, untyped]) -> [Integer, Hash[String, String], Array[String]]
     def respond: (Integer, Hash[Symbol, untyped]) -> [ Integer, Hash[String, String], Array[String] ]

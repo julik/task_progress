@@ -42,7 +42,7 @@ class BenchApp
     @jobs = {}
     @started = 0
     @lock = Mutex.new
-    @tokens = TaskProgress::CancelToken.new(SecureRandom.hex(32))
+    @tokens = TaskProgress::Token.new(SecureRandom.hex(32))
     @assets = Assiette::AssetHandler.new(root: PUBLIC, additional_directory_mappings: {"/task_progress" => TaskProgress.js_path})
     @app = Assiette::Server.new(method(:route), @assets)
   end

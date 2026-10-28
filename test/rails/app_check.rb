@@ -225,6 +225,28 @@ class RailsAppCheck < Minitest::Test
     assert_nil TaskProgress.stream_store.get(TaskProgress::StreamOutput.beat_key(import.key)), "and not beating"
   end
 
+  def test_a_page_gets_links_to_a_tree_and_never_its_key
+    import = TaskProgress.handoff("Importing", cancelable: true)
+    progress = TaskProgress.for_page(import)
+    refute_includes progress.to_json, import.key, "a token in the links, not the key"
+    assert_equal "Importing", TaskProgress::Wire.from_h(progress[:snapshot]).events.first.value[:name], "and the tree as it stands"
+
+    app = Rack::MockRequest.new(Rails.application)
+    polled = app.get(progress[:poll])
+    assert_equal [200, "application/json"], [polled.status, polled.content_type]
+    assert_equal 202, app.post(progress[:cancel], params: {path: ""}).status, "asked of whoever takes it up"
+    ran = false
+    TaskProgress.adopt(import.key) { ran = true }
+    refute ran, "the worker took the request up before it began"
+    assert TaskProgress.fetch(import.key).canceled?
+    assert_equal 200, app.post(progress[:cancel], params: {path: ""}).status, "too late now, and no fuss"
+    forged = progress[:poll].sub(%r{/trees/[^/]+/}, "/trees/forged/")
+    assert_equal 403, app.get(forged).status
+    events = app.get(progress[:events])
+    assert_equal "text/event-stream", events.content_type
+    assert_includes events.body, "event: batch"
+  end
+
   def test_a_task_from_this_process_alone_cannot_go_to_a_job
     assert_raises(ActiveJob::SerializationError) { ImportJob.perform_later(1, TaskProgress.new("local")) }
   end

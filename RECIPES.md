@@ -4,6 +4,7 @@ Whole setups to copy from, start to end. The [README](README.md) has the short v
 
 - [Relaying a command's progress: ffmpeg](#relaying-a-commands-progress-ffmpeg)
 - [A video transcoded in a background job, polled from a Rails page](#a-video-transcoded-in-a-background-job-polled-from-a-rails-page)
+- [The same video on an Inertia page, with React](#the-same-video-on-an-inertia-page-with-react)
 - [Videos transcoded in subprocesses, drawn in one terminal](#videos-transcoded-in-subprocesses-drawn-in-one-terminal)
 - [A Rails action that streams its own progress to React](#a-rails-action-that-streams-its-own-progress-to-react)
 
@@ -93,14 +94,6 @@ add_column :videos, :progress_key, :string
 **3. Hand the tree to the job.**
 
 ```ruby
-# config/routes.rb
-resources :videos do
-  member do
-    get :progress
-    post :cancel
-  end
-end
-
 # app/controllers/videos_controller.rb
 class VideosController < ApplicationController
   def create
@@ -111,23 +104,13 @@ class VideosController < ApplicationController
     redirect_to video
   end
 
-  def progress
-    video = Video.find(params[:id])
-    status, headers, body = TaskProgress::Poll.response(video.progress_key, request.env)
-    response.headers.merge!(headers)
-    self.status = status
-    self.response_body = body
-  end
-
-  def cancel
-    video = Video.find(params[:id])
-    TaskProgress.fetch(video.progress_key).request_cancel(params[:path].to_s, "Canceled from the page")
-    head :accepted
+  def show
+    @video = current_user.videos.find(params[:id])
   end
 end
 ```
 
-The tree is pending from the moment it is handed off, so the page shows the video queued before any worker has it. Check in `progress` and `cancel` that the video is the user's to see - the key is all that names the tree.
+The tree is pending from the moment it is handed off, so the page shows the video queued before any worker has it. No routes or actions for the progress itself: the Railtie mounts them, and the page gets links to them from `TaskProgress.for_page` - links with a signed token in them, never the tree's key. Handing them out in `show`, which only finds the user's own videos, is the authorization.
 
 **4. Do the work.** The job gets the tree as an argument, already taken up. Its `perform` is the tree's work: done when it returns, failed with the error when it raises. Each size is a task of its own, moved along by [the ffmpeg relay](#relaying-a-commands-progress-ffmpeg):
 
@@ -170,14 +153,76 @@ application.register("task-tree", TaskTreeController)
 <%# app/views/videos/show.html.erb %>
 <link rel="stylesheet" href="/task_progress/js/task_tree.css">
 <div class="tree" data-controller="task-tree"
-     data-task-tree-url-value="<%= progress_video_path(@video) %>"
-     data-task-tree-poll-value="1"
-     data-task-tree-cancel-url-value="<%= cancel_video_path(@video) %>"></div>
+     data-task-tree-progress-value="<%= TaskProgress.for_page(@video.progress_key).to_json %>"
+     data-task-tree-poll-value="1"></div>
 ```
 
-It polls every second (`poll-value`), draws once a frame at most, and stops once the video is through. Cancel buttons post to the cancel URL with the page's CSRF token.
+The tree is drawn at once, from the snapshot `for_page` puts in. Then it polls every second (`poll-value`), draws once a frame at most, and stops once the video is through. Its cancel buttons ask where `for_page` says.
 
-To have each poll wait for news instead - long polling - set `data-task-tree-wait-value="25"` in place of the poll value. The same `progress` action does it: asked to wait, `Poll` follows the stream for as long as the request waits. Every waiting poll holds a server thread, so size Puma for the pages you expect open at once.
+To have each poll wait for news instead - long polling - set `data-task-tree-wait-value="25"` in place of the poll value; every waiting poll holds a server thread, so size Puma for the pages you expect open at once. Leave both out, and it follows the tree over Server-Sent Events, falling back to polling by itself where those do not get through.
+
+## The same video on an Inertia page, with React
+
+The job and the controller's `create` are [the ones above](#a-video-transcoded-in-a-background-job-polled-from-a-rails-page). What changes is the page: a React component that Inertia renders, and that reloads the video once its renditions are there.
+
+**1. The browser client, from npm.**
+
+```
+$ npm install @julik/task-progress
+```
+
+It is the same code as the gem's `js/`, at the same version, with TypeScript declarations. React is a peer dependency - the one your app has.
+
+**2. One prop.**
+
+```ruby
+# app/controllers/videos_controller.rb
+def show
+  video = current_user.videos.find(params[:id])
+  render inertia: "Videos/Show", props: {
+    video: video.as_json(methods: :rendition_urls),
+    progress: -> { TaskProgress.for_page(video.progress_key) if video.progress_key }
+  }
+end
+```
+
+`for_page` hands out the links to the tree's events, polling and cancellations - with a signed token in them, good for an hour - and the tree as it stands, for the first render. As a lambda, Inertia leaves it out of a partial reload that does not ask for it.
+
+**3. The component.**
+
+```tsx
+// app/frontend/pages/Videos/Show.tsx
+import { router } from "@inertiajs/react"
+import { TaskTreeView, type Progress } from "@julik/task-progress/react"
+import "@julik/task-progress/task_tree.css"
+
+export default function Show({ video, progress }: { video: Video; progress: Progress | null }) {
+  return (
+    <>
+      <VideoPlayer video={video} />
+      {progress && (
+        <div className="tree">
+          <TaskTreeView progress={progress} onComplete={() => router.reload({ only: ["video"] })} />
+        </div>
+      )}
+    </>
+  )
+}
+```
+
+It draws the snapshot straight away - server-side rendering included - follows the tree over Server-Sent Events, and falls back to polling by itself where those do not get through. When the root is done, `onComplete` reloads `video`, and the player has its renditions; `onFail` is there for the other outcome. Navigating away closes the stream.
+
+To draw it your own way - with your design system's components, say - take the rows instead:
+
+```tsx
+import { useTaskTree } from "@julik/task-progress/react"
+
+const { rows, cancel } = useTaskTree(progress, { onComplete: () => router.reload({ only: ["video"] }) })
+return rows.map((row) => (
+  <ProgressRow key={row.key} depth={row.depth} name={row.name} percent={row.percent} striped={row.indeterminate}
+    status={row.status} message={row.message} onCancel={row.cancelable ? () => cancel(row) : undefined} />
+))
+```
 
 ## Videos transcoded in subprocesses, drawn in one terminal
 
@@ -285,7 +330,7 @@ The tree is sent whole first, then every change as it happens, and the stream en
 **2. Load the client.**
 
 ```
-$ bin/importmap pin react react-dom/client htm
+$ bin/importmap pin react react-dom/client
 ```
 
 ```ruby

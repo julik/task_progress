@@ -1,0 +1,30 @@
+{
+  "name": "@julik/task-progress",
+  "version": "1.0.0",
+  "description": "The browser half of the task_progress gem: progress trees over SSE or polling, with React and Stimulus on top",
+  "license": "MIT",
+  "type": "module",
+  "repository": { "type": "git", "url": "git+https://github.com/julik/task_progress.git", "directory": "js" },
+  "homepage": "https://github.com/julik/task_progress",
+  "exports": {
+    ".": { "types": "./task_tree.d.ts", "default": "./task_tree.js" },
+    "./react": { "types": "./react_task_tree.d.ts", "default": "./react_task_tree.js" },
+    "./stimulus": { "types": "./stimulus_controller.d.ts", "default": "./stimulus_controller.js" },
+    "./local_tasks": { "types": "./local_tasks.d.ts", "default": "./local_tasks.js" },
+    "./row_view": { "types": "./row_view.d.ts", "default": "./row_view.js" },
+    "./clock": { "types": "./task_progress_clock.d.ts", "default": "./task_progress_clock.js" },
+    "./task_tree.css": "./task_tree.css"
+  },
+  "files": ["*.js", "*.d.ts", "*.css"],
+  "sideEffects": ["./task_progress_clock.js", "*.css"],
+  "peerDependencies": {
+    "@hotwired/stimulus": ">=3",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "@hotwired/stimulus": { "optional": true },
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
+  }
+}

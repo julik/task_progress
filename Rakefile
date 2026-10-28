@@ -7,7 +7,7 @@ Rake::TestTask.new(:test) do |t|
   t.warning = false
 end
 
-task default: %i[test standard]
+task default: %i[test standard types]
 
 desc "Write the inline RBS types out to sig/generated"
 task :rbs do

@@ -14,6 +14,8 @@ class TaskProgress
   # do nothing, returning false, unless it does. Checked and done in one step, which is what keeps
   # a writer another has replaced from writing over it, see StreamOutput
   class MemoryStreamStore
+    @namespace: String?
+
     @appended: Thread::ConditionVariable
 
     @lock: Thread::Mutex
@@ -26,9 +28,9 @@ class TaskProgress
 
     @entries: Hash[String, Array[[ Integer, String ]]]
 
-    # An empty stream
-    # : () -> void
-    def initialize: () -> void
+    # An empty store. With a `namespace`, its keys go under it - see RedisStreamStore
+    # : (?namespace: String?) -> void
+    def initialize: (?namespace: String?) -> void
 
     # Adds `data` at the end of the stream at `key`, and returns its id
     # : (String, String) -> String
@@ -64,6 +66,9 @@ class TaskProgress
     # Runs the block under the lock if the guard holds, and says whether it did
     # : ([String, String]?) { () -> void } -> bool
     def guarded: ([ String, String ]?) { () -> void } -> bool
+
+    # : (String) -> String
+    def ns: (String) -> String
 
     # : () -> Float
     def now: () -> Float

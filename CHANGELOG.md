@@ -18,6 +18,9 @@ is nothing before it to be compatible with.
 - Turbo: a tree drawn as HTML and morphed into every page that shows it, from wherever the job runs.
 - Big trees fold their finished and waiting siblings into a row each, in every renderer.
 - `task_progress watch KEY` draws a handed-off tree in a terminal.
+- `TaskProgress.for_page(key)` hands a page signed links to a handed-off tree and its snapshot, which `TreesApp` - mounted by the Railtie - answers; the key never leaves the server. React gets `useTaskTree(progress)` and `<TaskTreeView progress onComplete onFail>`, Stimulus a `progress` value, and both fall back from SSE to polling by themselves.
+- The browser client is on npm as `@julik/task-progress`, with TypeScript declarations, at the gem's version.
+- Stream stores take a `namespace:`; an unset one raises in production rather than keep trees in one process.
 - In Rails, the browser client is served at `/task_progress/js`, and cancel buttons send the page's CSRF token.
 - RECIPES.md: whole setups to start from.
 - Test helpers: `outline`, `RecordingOutput`, `TaskProgress::Assertions`.
