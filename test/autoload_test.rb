@@ -80,10 +80,10 @@ class AutoloadTest < Minitest::Test
     out = ruby(<<~RUBY)
       require "task_progress"
       TaskProgress.eager_load!
-      p TaskProgress.constants.select { TaskProgress.autoload?(it) }
+      p TaskProgress.constants.select { TaskProgress.autoload?(it) }.sort
       p [defined?(JSON), defined?(OpenSSL)]
     RUBY
-    assert_equal %([:TrackedIO, :JobSerializer]\n["constant", "constant"]\n), out, "TrackedIO and JobSerializer stay unloaded without their gems"
+    assert_equal %([:JobSerializer, :TrackedIO]\n["constant", "constant"]\n), out, "TrackedIO and JobSerializer stay unloaded without their gems"
   end
 
   def test_the_npm_package_is_the_gems_version
