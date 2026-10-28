@@ -136,12 +136,7 @@ end
 
 Storing is a task too, without a measure: it counts for little (weight 1 against the transcode's 2) and shows a spinner while it runs. A retry starts the tree over, and the page shows "attempt 2". A worker that dies without a word goes stale on the page after a few seconds, and fails after a minute. Canceling "720p" from the page stops ffmpeg and ends that task - the job goes on with 480p; cancel the root to stop the job, without failing it.
 
-**5. Draw it.**
-
-```ruby
-# config/importmap.rb
-pin "task_progress/stimulus", to: "/task_progress/js/stimulus_controller.js"
-```
+**5. Draw it.** With importmap-rails, the Railtie has pinned `task_progress/stimulus` already.
 
 ```js
 // app/javascript/controllers/index.js
@@ -165,13 +160,14 @@ To have each poll wait for news instead - long polling - set `data-task-tree-wai
 
 The job and the controller's `create` are [the ones above](#a-video-transcoded-in-a-background-job-polled-from-a-rails-page). What changes is the page: a React component that Inertia renders, and that reloads the video once its renditions are there.
 
-**1. The browser client, from npm.**
+**1. The browser client, vendored from the gem.**
 
 ```
-$ npm install @julik/task-progress
+$ bin/rails task_progress:vendor
+$ npm install ./vendor/javascript/task_progress
 ```
 
-It is the same code as the gem's `js/`, at the same version, with TypeScript declarations. React is a peer dependency - the one your app has.
+The first copies the gem's `js/` into `vendor/javascript/task_progress`, as a package named `task_progress` with TypeScript declarations; the second links it into `node_modules`, for Vite to resolve like any other. React is a peer dependency - the one your app has. Commit the vendored copy, and run the task again after updating the gem - Rails warns at boot when the copy is older than the gem.
 
 **2. One prop.**
 
@@ -193,8 +189,8 @@ end
 ```tsx
 // app/frontend/pages/Videos/Show.tsx
 import { router } from "@inertiajs/react"
-import { TaskTreeView, type Progress } from "@julik/task-progress/react"
-import "@julik/task-progress/task_tree.css"
+import { TaskTreeView, type Progress } from "task_progress/react"
+import "task_progress/task_tree.css"
 
 export default function Show({ video, progress }: { video: Video; progress: Progress | null }) {
   return (
@@ -215,7 +211,7 @@ It draws the snapshot straight away - server-side rendering included - follows t
 To draw it your own way - with your design system's components, say - take the rows instead:
 
 ```tsx
-import { useTaskTree } from "@julik/task-progress/react"
+import { useTaskTree } from "task_progress/react"
 
 const { rows, cancel } = useTaskTree(progress, { onComplete: () => router.reload({ only: ["video"] }) })
 return rows.map((row) => (
@@ -333,10 +329,7 @@ The tree is sent whole first, then every change as it happens, and the stream en
 $ bin/importmap pin react react-dom/client
 ```
 
-```ruby
-# config/importmap.rb
-pin "task_progress/react", to: "/task_progress/js/react_task_tree.js"
-```
+The Railtie pins `task_progress/react` itself. In an app with a bundler, vendor it instead - see [the Inertia recipe](#the-same-video-on-an-inertia-page-with-react).
 
 **3. Draw it.** In a React app:
 

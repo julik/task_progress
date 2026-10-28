@@ -1,7 +1,8 @@
 {
-  "name": "@julik/task-progress",
+  "name": "task_progress",
+  "private": true,
   "version": "1.0.0",
-  "description": "The browser half of the task_progress gem: progress trees over SSE or polling, with React and Stimulus on top",
+  "description": "The browser half of the task_progress gem, vendored from it - see `task_progress vendor`",
   "license": "MIT",
   "type": "module",
   "repository": { "type": "git", "url": "git+https://github.com/julik/task_progress.git", "directory": "js" },

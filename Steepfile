@@ -8,7 +8,7 @@ target :lib do
   # Rails is not a dependency, so there are no types for it to check the Railtie against
   ignore "lib/task_progress/railtie.rb", "lib/task_progress/job_serializer.rb"
 
-  library "json", "openssl", "securerandom", "io-console", "cgi", "uri", "erb", "pp", "digest"
+  library "json", "openssl", "securerandom", "io-console", "cgi", "uri", "erb", "pp", "digest", "fileutils"
 
   configure_code_diagnostics(D::Ruby.default)
 end

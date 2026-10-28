@@ -78,6 +78,10 @@ GEM
       activesupport (>= 6.1)
     i18n (1.15.2)
       concurrent-ruby (~> 1.0)
+    importmap-rails (2.2.3)
+      actionpack (>= 6.0.0)
+      activesupport (>= 6.0.0)
+      railties (>= 6.0.0)
     io-console (0.9.4)
     irb (1.18.0)
       pp (>= 0.6.0)
@@ -241,6 +245,7 @@ DEPENDENCIES
   activemodel
   assiette!
   ferrum (~> 0.17)
+  importmap-rails
   minitest (~> 5.25)
   progressive_io (~> 2.0)
   puma
@@ -283,6 +288,7 @@ CHECKSUMS
   fileutils (1.8.1) sha256=2d541a1ee34a9ed5c4f054be8fb819a26b5d654488a31dc8806917cf448b9cc3
   globalid (1.4.0) sha256=037f12fbf1d9d7a014d501c2d5c77356fd4ddd96d7a7991d6700bba96706f427
   i18n (1.15.2) sha256=00f9eb62412fe593b2a65a97daa75300d37abb8f7202ec748e94b6d46a9dd1b5
+  importmap-rails (2.2.3) sha256=7101be2a4dc97cf1558fb8f573a718404c5f6bcfe94f304bf1f39e444feeb16a
   io-console (0.9.4) sha256=a403304f32928ee85e56d457b4612ca43f2703b561a3258844992bd24085fbb1
   irb (1.18.0) sha256=de9454a0703a54704b9811a5ef31a60c86949fbf4013fcf244fabc7c775248e3
   json (3.1.0) sha256=3ce7ccf8fde58960177a3a756c31f292a4c1e1dedee884547096a5b0604e3bd8

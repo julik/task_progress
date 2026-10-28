@@ -546,6 +546,21 @@ use Assiette::Server, root: "public", additional_directory_mappings: {"/task_pro
 
 The Stimulus controller and the React component import `@hotwired/stimulus`, `react` and `react-dom/client` by bare name - from `node_modules` in a Vite app, from the import map on a page without a build step. There is no JSX in them.
 
+### Getting it into an app
+
+**With importmap-rails** there is nothing to do. The Railtie serves `js/` at `/task_progress/js`, and pins it in the app's import map under the same names a bundler would use: `task_progress`, `task_progress/react`, `task_progress/stimulus`, `task_progress/local_tasks`, `task_progress/row_view` and `task_progress/clock`. None of them is preloaded. A pin of the same name in your `config/importmap.rb` wins. `config.task_progress.importmap = false` leaves the map alone.
+
+**With a bundler** - Vite, esbuild, Inertia - vendor a copy:
+
+```
+$ bin/rails task_progress:vendor                  # into vendor/javascript/task_progress
+$ npm install ./vendor/javascript/task_progress
+```
+
+The copy is a package of its own, named `task_progress`, with the `.d.ts` declarations next to the modules: `import { TaskTreeView } from "task_progress/react"`, `import "task_progress/task_tree.css"`. Commit it. It does not update with the gem, so run the task again after an update. Rails warns at boot while the vendored copy is older than the gem it runs with. `config.task_progress.vendor_path` moves it, and `DIR=` sends one run elsewhere.
+
+Outside Rails, `task_progress vendor [DIR]` does the same - into `task_progress/` in the current directory, or `vendor/javascript/task_progress` when it is a Rails app's root. `TaskProgress.vendor_js(dir)` from Ruby. Each run replaces what the last left there. A directory holding files of anyone else's is left alone.
+
 ### task_tree.js
 
 ```js
@@ -691,7 +706,7 @@ TaskProgress.broadcast(import, "Importing") { |root| ... }    # in a job, anywhe
 <%= task_progress_tree @import %>                               <%# in its page %>
 ```
 
-Then put `task_tree.css` on the page, and import `task_progress_clock.js` for elapsed times to tick. The Railtie serves `js/` as it is at `/task_progress/js` (`config.task_progress.js_path`, nil for none): `<link rel="stylesheet" href="/task_progress/js/task_tree.css">`, and `pin "task_progress/clock", to: "/task_progress/js/task_progress_clock.js"` in the import map.
+Then put `task_tree.css` on the page, and import `task_progress_clock.js` for elapsed times to tick. The Railtie serves `js/` as it is at `/task_progress/js` (`config.task_progress.js_path`, nil for none): `<link rel="stylesheet" href="/task_progress/js/task_tree.css">`, and `import "task_progress/clock"` - pinned already, with importmap-rails.
 
 - **Every frame is the whole tree**, drawn by HTMLRenderer and sent as `<turbo-stream action="replace" method="morph">`, at most every `interval:` seconds (0.25) however spammy the job is. A Turbo Stream has no seq and no gaps to notice; a page that missed a frame, or joined late, is set right by the next one. Morphing changes only what differs, so a bar eases to its new width.
 - **The last frame is kept in `Rails.cache`**, under `task_progress/<dom_id>`, for the helper to draw before the first broadcast arrives.

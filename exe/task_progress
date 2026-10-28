@@ -5,29 +5,47 @@ require "optparse"
 require_relative "../lib/task_progress"
 
 url = ENV.fetch("REDIS_URL", "redis://localhost:6379")
+# In a Rails app, where the Railtie looks for it too
+default_dir = File.exist?("config/application.rb") ? "vendor/javascript/task_progress" : "task_progress"
 parser = OptionParser.new do |o|
   o.banner = <<~TEXT
     Usage: task_progress watch KEY [--redis URL]
+           task_progress vendor [DIR]
 
-    Draws a tree handed off with TaskProgress.handoff - running anywhere that reaches the same
-    Redis - until it finishes. Exits 0 if it was complete, 1 if not. Ctrl-C stops watching, and
-    leaves the work alone.
+    watch    Draws a tree handed off with TaskProgress.handoff - running anywhere that reaches
+             the same Redis - until it finishes. Exits 0 if it was complete, 1 if not. Ctrl-C
+             stops watching, and leaves the work alone.
+    vendor   Copies the browser client into DIR (#{default_dir}), replacing what an earlier
+             vendoring left there, for a bundler to take from - `npm install ./DIR` makes it
+             the `task_progress` package.
 
   TEXT
   o.on("--redis URL", "Where the tree is kept (REDIS_URL, or #{url})") { url = it }
 end
-command, key = parser.parse(ARGV)
-abort(parser.help) unless command == "watch" && key
+command, arg = parser.parse(ARGV)
 
-begin
-  require "redis-client"
-rescue LoadError
-  abort "task_progress watch needs the redis-client gem"
-end
-
-stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url:).new_pool(size: 2))
-begin
-  exit(TaskProgress.watch(key, stream_store:).complete? ? 0 : 1)
-rescue KeyError => e
-  abort e.message
+case command
+when "vendor"
+  dir = arg || default_dir
+  begin
+    files = TaskProgress.vendor_js(dir)
+  rescue ArgumentError => e
+    abort e.message
+  end
+  puts "The task_progress client #{TaskProgress::VERSION} is in #{dir}: #{files.join(", ")}"
+when "watch"
+  abort(parser.help) unless arg
+  begin
+    require "redis-client"
+  rescue LoadError
+    abort "task_progress watch needs the redis-client gem"
+  end
+  stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url:).new_pool(size: 2))
+  begin
+    exit(TaskProgress.watch(arg, stream_store:).complete? ? 0 : 1)
+  rescue KeyError => e
+    abort e.message
+  end
+else
+  abort(parser.help)
 end

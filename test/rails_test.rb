@@ -9,6 +9,6 @@ class RailsTest < Minitest::Test
     skip "railties and turbo-rails are not installed" unless Gem.loaded_specs.key?("turbo-rails")
     out, status = Open3.capture2e(RbConfig.ruby, File.expand_path("rails/app_check.rb", __dir__))
     assert status.success?, out
-    assert_match(/11 runs, \d+ assertions, 0 failures, 0 errors/, out)
+    assert_match(/14 runs, \d+ assertions, 0 failures, 0 errors/, out)
   end
 end

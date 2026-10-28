@@ -1,9 +1,9 @@
-import { followProgress, TaskTree, type Progress, type Batch } from "@julik/task-progress"
-import { useTaskTree, TaskTreeView, createTaskTreeRoot, type Progress as PageProgress, type RowView } from "@julik/task-progress/react"
-import TaskTreeController from "@julik/task-progress/stimulus"
-import { LocalTasks, trackUpload } from "@julik/task-progress/local_tasks"
-import { rowView } from "@julik/task-progress/row_view"
-import "@julik/task-progress/clock"
+import { followProgress, TaskTree, type Progress, type Batch } from "task_progress"
+import { useTaskTree, TaskTreeView, createTaskTreeRoot, type Progress as PageProgress, type RowView } from "task_progress/react"
+import TaskTreeController from "task_progress/stimulus"
+import { LocalTasks, trackUpload } from "task_progress/local_tasks"
+import { rowView } from "task_progress/row_view"
+import "task_progress/clock"
 
 const progress: Progress = { events: "/e", poll: "/p", cancel: "/c" }
 const following = followProgress(progress, (tree, changes) => { console.log(tree.root?.name, changes.structure) }, { transport: "auto", poll: 1 })

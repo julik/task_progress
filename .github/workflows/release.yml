@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: rubygems
     permissions:
-      id-token: write # RubyGems trusted publishing, and npm provenance
+      id-token: write # RubyGems trusted publishing
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -22,15 +22,3 @@ jobs:
       - name: The tag matches the version
         run: test "v$(ruby -Ilib -e 'require "task_progress/version"; print TaskProgress::VERSION')" = "${GITHUB_REF_NAME}"
       - uses: rubygems/release-gem@v1
-      # The browser client goes to npm as @julik/task-progress, at the same version - when there is
-      # a token to publish with
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-      - name: Publish to npm
-        if: env.NODE_AUTH_TOKEN != ''
-        working-directory: js
-        run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

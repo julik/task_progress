@@ -18,7 +18,7 @@ Gem::Specification.new do |s|
   }
   s.required_ruby_version = ">= 3.4"
 
-  s.files = Dir["lib/**/*.rb", "sig/generated/**/*.rbs", "js/*.{js,css,d.ts}", "js/package.json", "exe/*", "README.md", "MANUAL.md", "RECIPES.md", "CHANGELOG.md", "LICENSE*"]
+  s.files = Dir["lib/**/*.rb", "sig/generated/**/*.rbs", "js/*.{js,css,d.ts}", "js/package.json", "config/importmap.rb", "exe/*", "README.md", "MANUAL.md", "RECIPES.md", "CHANGELOG.md", "LICENSE*"]
   s.require_paths = ["lib"]
   s.bindir = "exe"
   s.executables = ["task_progress"]

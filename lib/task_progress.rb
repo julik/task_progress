@@ -466,6 +466,39 @@ class TaskProgress
   #: () -> String
   def self.js_path = File.expand_path("../js", __dir__ || ".")
 
+  # Copies the browser client into `dir`, for a bundler - Vite, esbuild - to take from there, and
+  # returns the names of the files it wrote. The copy is a package of its own, named
+  # `task_progress`: `npm install ./dir` puts it in `node_modules`, TypeScript declarations and all.
+  #
+  # `dir` is the gem's: whatever an earlier vendoring left there is replaced, so a file the gem
+  # no longer ships goes too. A directory with files of its own in it is left alone, and raises
+  #: (String) -> Array[String]
+  def self.vendor_js(dir)
+    require "fileutils"
+    require "json"
+    manifest = File.join(dir, "package.json")
+    ours = File.exist?(manifest) && JSON.parse(File.read(manifest))["name"] == "task_progress"
+    if Dir.exist?(dir) && !Dir.empty?(dir) && !ours
+      raise ArgumentError, "#{dir} has files of its own - vendor into an empty directory, or one vendored before"
+    end
+    FileUtils.rm_rf(dir)
+    FileUtils.mkdir_p(dir)
+    files = Dir[File.join(js_path, "*.{js,css,d.ts}")] + [File.join(js_path, "package.json")]
+    FileUtils.cp(files, dir)
+    files.map { File.basename(it) }.sort
+  rescue JSON::ParserError
+    raise ArgumentError, "#{dir} has a package.json of its own - vendor into an empty directory, or one vendored before"
+  end
+
+  # The version of the client vendored into `dir`, or nil when there is none
+  #: (String) -> String?
+  def self.vendored_js_version(dir)
+    require "json"
+    JSON.parse(File.read(File.join(dir, "package.json")))["version"] if File.exist?(File.join(dir, "package.json"))
+  rescue JSON::ParserError
+    nil
+  end
+
   # A silent root, for a library's default
   #: (?String) -> TaskProgress
   def self.null(name = "progress") = new(name)

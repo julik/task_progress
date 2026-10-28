@@ -32,6 +32,7 @@ group :test do
   gem "actioncable", require: false
   gem "activemodel", require: false
   gem "turbo-rails", require: false
+  gem "importmap-rails", require: false
   gem "activejob", require: false
   # The Redis stream is tested against a real Redis, through both clients it takes, when one runs
   gem "redis-client", require: false

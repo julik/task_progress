@@ -8,19 +8,30 @@ require "active_job/railtie"
 require "action_cable/engine"
 require "active_model"
 require "turbo-rails"
+require "importmap-rails"
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "task_progress"
 require "rack/mock"
+require "rake"
+require "stringio"
+require "tmpdir"
+require "json"
 require "minitest/autorun"
+
+# A client vendored from an older gem, for the Railtie to warn about
+STALE = Dir.mktmpdir
+LOG = StringIO.new
+File.write(File.join(STALE, "package.json"), JSON.generate({name: "task_progress", version: "0.9.0"}))
 
 class CheckApp < Rails::Application
   config.root = __dir__
   config.eager_load = false
   config.secret_key_base = "s" * 64
   config.cache_store = :memory_store
-  config.logger = Logger.new(nil)
+  config.logger = Logger.new(LOG)
   config.hosts.clear
   config.action_controller.allow_forgery_protection = false
+  config.task_progress.vendor_path = STALE
 end
 CheckApp.initialize!
 ActionCable.server.config.cable = {"adapter" => "test"}
@@ -202,6 +213,30 @@ class RailsAppCheck < Minitest::Test
     response = Rack::MockRequest.new(Rails.application).get("/task_progress/js/react_task_tree.js")
     assert_equal 200, response.status
     assert_includes response.body, 'from "./task_tree.js"', "relative imports, which resolve next to it"
+  end
+
+  def test_the_import_map_pins_the_client_where_it_is_served
+    map = JSON.parse(Rails.application.importmap.to_json(resolver: ActionController::Base.helpers))["imports"]
+    assert_equal "/task_progress/js/react_task_tree.js", map["task_progress/react"]
+    assert_equal "/task_progress/js/task_tree.js", map["task_progress"]
+    assert_equal 200, Rack::MockRequest.new(Rails.application).get(map["task_progress/stimulus"]).status
+    preloaded = Rails.application.importmap.preloaded_module_paths(resolver: ActionController::Base.helpers)
+    assert_empty preloaded.grep(/task_progress/), "pages without React must not fetch the React part"
+  end
+
+  def test_the_vendor_task_copies_the_client
+    Rails.application.load_tasks unless Rake::Task.task_defined?("task_progress:vendor")
+    Dir.mktmpdir do |dir|
+      ENV["DIR"] = File.join(dir, "client")
+      capture_io { Rake::Task["task_progress:vendor"].execute }
+      assert File.exist?(File.join(dir, "client", "react_task_tree.d.ts"))
+    ensure
+      ENV.delete("DIR")
+    end
+  end
+
+  def test_a_stale_vendored_client_is_warned_about_at_boot
+    assert_match(/has the client from 0\.9\.0 - run `rails task_progress:vendor`/, LOG.string)
   end
 
   def test_the_sse_recipe

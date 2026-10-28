@@ -6,7 +6,7 @@
   "scripts": { "check": "tsc --noEmit --strict --jsx react-jsx --module nodenext --moduleResolution nodenext --target es2022 --lib es2022,dom consumer.tsx" },
   "devDependencies": {
     "@hotwired/stimulus": "3.2.2",
-    "@julik/task-progress": "file:../../js",
+    "task_progress": "file:../../js",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "react": "18.3.1",

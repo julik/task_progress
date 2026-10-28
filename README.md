@@ -109,7 +109,7 @@ end
 TaskProgress::SSE.response(import.key)                     # a page's stream, anywhere that reaches Redis
 ```
 
-`TaskProgress.for_page(import.key)` is everything a page needs - links with a signed token in them, never the key, and the tree as it stands - for a Stimulus value or an Inertia prop: `<TaskTreeView progress={progress} onComplete={() => router.reload()} />`, with `npm install @julik/task-progress`. The page shows the job queued before a worker has it. A worker that dies goes stale, then fails; a retry starts the tree over as attempt 2. `task_progress watch KEY` draws it in a terminal.
+`TaskProgress.for_page(import.key)` is everything a page needs - links with a signed token in them, never the key, and the tree as it stands - for a Stimulus value or an Inertia prop: `<TaskTreeView progress={progress} onComplete={() => router.reload()} />`, with the client from `rails task_progress:vendor` - or pinned by itself, with importmap-rails. The page shows the job queued before a worker has it. A worker that dies goes stale, then fails; a retry starts the tree over as attempt 2. `task_progress watch KEY` draws it in a terminal.
 
 ## Across processes
 

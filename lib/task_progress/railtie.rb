@@ -3,14 +3,19 @@
 class TaskProgress
   # Loaded only inside a Rails app: trees as job arguments (see JobSerializer), the
   # `task_progress_tree` helper in every view, the browser client at `/task_progress/js` (and on the
-  # asset path), and a route for the cancel buttons - at `/task_progress/cancellations`, unless
-  # `config.task_progress.cancellations_path` says elsewhere, or is nil for none
+  # asset path, and pinned in the import map when importmap-rails is in use), a route for the
+  # cancel buttons - at `/task_progress/cancellations`, unless `config.task_progress.cancellations_path`
+  # says elsewhere, or is nil for none - and `rails task_progress:vendor`
   class Railtie < ::Rails::Railtie
     config.task_progress = ActiveSupport::OrderedOptions.new
     config.task_progress.cancellations_path = "/task_progress/cancellations"
     # The browser client, as it is - an asset pipeline would fingerprint the file you import, and
     # leave the relative imports inside it pointing at names it does not serve
     config.task_progress.js_path = "/task_progress/js"
+    # Pins `task_progress`, `task_progress/react` and the rest to it, when importmap-rails is in use
+    config.task_progress.importmap = true
+    # Where `rails task_progress:vendor` copies the client to, for a bundler to take it from
+    config.task_progress.vendor_path = "vendor/javascript/task_progress"
     # Where pages get handed-off trees from, by the links TaskProgress.for_page hands out
     config.task_progress.trees_path = "/task_progress/trees"
     # Where handed-off trees are kept - a TaskProgress::RedisStreamStore, say. Unset, see TaskProgress.stream_store
@@ -33,6 +38,33 @@ class TaskProgress
 
     initializer "task_progress.assets" do |app|
       app.config.assets.paths << TaskProgress.js_path if app.config.respond_to?(:assets)
+    end
+
+    # Before importmap-rails draws the app's own pins, so that a pin of the same name there wins
+    initializer "task_progress.importmap", before: "importmap" do |app|
+      options = app.config.task_progress
+      if app.config.respond_to?(:importmap) && options.importmap && options.js_path
+        app.config.importmap.paths << File.expand_path("../../config/importmap.rb", __dir__)
+      end
+    end
+
+    # A vendored copy is not updated with the gem - say so, rather than serve the old one
+    config.after_initialize do |app|
+      vendored = TaskProgress.vendored_js_version(app.root.join(app.config.task_progress.vendor_path).to_s)
+      if vendored && vendored != TaskProgress::VERSION
+        Rails.logger&.warn("task_progress #{TaskProgress::VERSION} is installed, but #{app.config.task_progress.vendor_path} has the client from #{vendored} - run `rails task_progress:vendor`")
+      end
+    end
+
+    rake_tasks do
+      namespace :task_progress do
+        desc "Copy the browser client into config.task_progress.vendor_path, or DIR"
+        task :vendor do
+          dir = ENV["DIR"] || Rails.root.join(Rails.application.config.task_progress.vendor_path).to_s
+          TaskProgress.vendor_js(dir)
+          puts "The task_progress client #{TaskProgress::VERSION} is in #{dir}"
+        end
+      end
     end
 
     initializer "task_progress.routes" do |app|

@@ -228,6 +228,19 @@ class TaskProgress
   # : () -> String
   def self.js_path: () -> String
 
+  # Copies the browser client into `dir`, for a bundler - Vite, esbuild - to take from there, and
+  # returns the names of the files it wrote. The copy is a package of its own, named
+  # `task_progress`: `npm install ./dir` puts it in `node_modules`, TypeScript declarations and all.
+  #
+  # `dir` is the gem's: whatever an earlier vendoring left there is replaced, so a file the gem
+  # no longer ships goes too. A directory with files of its own in it is left alone, and raises
+  # : (String) -> Array[String]
+  def self.vendor_js: (String) -> Array[String]
+
+  # The version of the client vendored into `dir`, or nil when there is none
+  # : (String) -> String?
+  def self.vendored_js_version: (String) -> String?
+
   # A silent root, for a library's default
   # : (?String) -> TaskProgress
   def self.null: (?String) -> TaskProgress

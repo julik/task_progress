@@ -86,7 +86,7 @@ class AutoloadTest < Minitest::Test
     assert_equal %([:JobSerializer, :TrackedIO]\n["constant", "constant"]\n), out, "TrackedIO and JobSerializer stay unloaded without their gems"
   end
 
-  def test_the_npm_package_is_the_gems_version
+  def test_the_vendored_package_is_the_gems_version
     package = JSON.parse(File.read(File.expand_path("../js/package.json", __dir__)))
     assert_equal TaskProgress::VERSION, package["version"], "js/package.json and lib/task_progress/version.rb go up together"
   end
