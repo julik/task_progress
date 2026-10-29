@@ -51,12 +51,10 @@ class TaskProgress
       end
     end
 
-    # Before the app's own initializers, where Assiette's generated one builds the handler and
-    # exposes whatever is in `config.assiette.exposed`
-    initializer "task_progress.assiette", before: :load_config_initializers do |app|
-      if app.config.respond_to?(:assiette) && app.config.task_progress.assiette
-        app.config.assiette.exposed["@task_progress"] = TaskProgress.js_path
-      end
+    # Assiette runs this on every handler it serves with, and an app without it never does. The
+    # setting is read then, so an app may turn it off from an initializer of its own
+    initializer "task_progress.assiette" do |app|
+      ActiveSupport.on_load(:assiette) { expose("@task_progress", TaskProgress.js_path) if app.config.task_progress.assiette }
     end
 
     # A vendored copy is not updated with the gem - say so, rather than serve the old one

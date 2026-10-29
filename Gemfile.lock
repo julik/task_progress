@@ -1,6 +1,7 @@
 GIT
   remote: https://github.com/julik/assiette.git
-  revision: 87b0fc9610e820b07a5f2d3e2a057bc31760e020
+  revision: f509aafc1bb1c6a3735bbcfe439c38b452a846d6
+  branch: expose-load-hook
   specs:
     assiette (0.6.1)
       actionpack (>= 7.2)

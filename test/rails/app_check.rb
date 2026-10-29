@@ -226,12 +226,11 @@ class RailsAppCheck < Minitest::Test
   end
 
   def test_the_client_is_exposed_to_assiette_by_handle
-    assert_equal TaskProgress.js_path, Rails.application.config.assiette.exposed["@task_progress"]
-
     Dir.mktmpdir do |root|
       File.write(File.join(root, "app.js"), %(import { TaskTree } from "@task_progress/task_tree.js"\n))
       handler = Assiette::AssetHandler.new(root:)
-      Rails.application.config.assiette.exposed.each { |handle, dirs| handler.expose(handle, dirs) }
+      Assiette::Server.new(->(_env) { [404, {}, []] }, handler)
+      assert_equal [Pathname.new(TaskProgress.js_path)], handler.exposed["@task_progress"]
       served = handler.dependency_graph.rewrite_content("app.js", File.read(File.join(root, "app.js")))
       assert_match %r{from "\./@task_progress/task_tree\.js\?s=\h{8}"}, served
     end
