@@ -56,20 +56,23 @@ A block is a task's work: done when it returns, failed with the error when it ra
 
 ## With Turbo
 
-In a Rails app with turbo-rails, a job draws its tree in every page that shows it - from whichever process it runs in, with no JavaScript of your own:
+In a Rails app with turbo-rails, a job draws its tree in every page that shows it - from whichever process it runs in, with no JavaScript of your own. The tree is drawn for a record, here a `CsvImport` - any Active Record model will do, the one whose page shows the progress:
 
 ```ruby
 class ImportJob < ApplicationJob
-  def perform(import)
-    TaskProgress.broadcast(import, "Importing") do |root|
-      root.subtask("Rows", total: rows.size, cancelable: true) { |t| rows.each { import_row(it) && t.tick } }
+  def perform(csv_import)
+    TaskProgress.broadcast(csv_import, "Importing") do |root|
+      root.subtask("Rows", total: csv_import.rows.size, cancelable: true) do |rows|
+        csv_import.rows.each { import_row(it) && rows.tick }
+      end
     end
   end
 end
 ```
 
 ```erb
-<%= task_progress_tree @import %>
+<%# app/views/csv_imports/show.html.erb %>
+<%= task_progress_tree @csv_import %>
 ```
 
 The job draws the whole tree as HTML a few times a second, and Action Cable takes it to every page, where Turbo morphs it in. Cancel buttons are plain forms. Nothing of Rails is needed for the rest of the gem: outside Rails, `to:` says where frames go, and `TurboSSE` streams them to a `<turbo-stream-source>`.
@@ -99,17 +102,17 @@ Create the tree here, and let a job write to it there - through Redis:
 ```ruby
 TaskProgress.stream_store = TaskProgress::RedisStreamStore.new(RedisClient.config(url: ENV["REDIS_URL"]).new_pool)
 
-import = TaskProgress.handoff("Importing", cancelable: true)
-ImportJob.perform_later(upload, import)                    # the task is an argument like any other
+progress = TaskProgress.handoff("Importing", cancelable: true)
+ImportJob.perform_later(csv_import, progress)              # the task is an argument like any other
 
-def perform(upload, import)                                # ...and arrives adopted: perform is its work
-  import.subtask("Rows", total: upload.rows) { |rows| ... }
+def perform(csv_import, progress)                          # ...and arrives adopted: perform is its work
+  progress.subtask("Rows", total: csv_import.rows.size) { |rows| ... }
 end
 
-TaskProgress::SSE.response(import.key)                     # a page's stream, anywhere that reaches Redis
+TaskProgress::SSE.response(progress.key)                   # a page's stream, anywhere that reaches Redis
 ```
 
-`TaskProgress.for_page(import.key)` is everything a page needs - links with a signed token in them, never the key, and the tree as it stands - for a Stimulus value or an Inertia prop: `<TaskTreeView progress={progress} onComplete={() => router.reload()} />`, with the client from `rails task_progress:vendor` - or pinned by itself, with importmap-rails. The page shows the job queued before a worker has it. A worker that dies goes stale, then fails; a retry starts the tree over as attempt 2. `task_progress watch KEY` draws it in a terminal.
+`csv_import` is the same `CsvImport` record as above; `progress` is the tree. `TaskProgress.for_page(progress.key)` is everything a page needs - links with a signed token in them, never the key, and the tree as it stands - for a Stimulus value or an Inertia prop: `<TaskTreeView progress={progress} onComplete={() => router.reload()} />`, with the client from `rails task_progress:vendor` - or pinned by itself, with importmap-rails. The page shows the job queued before a worker has it. A worker that dies goes stale, then fails; a retry starts the tree over as attempt 2. `task_progress watch KEY` draws it in a terminal.
 
 ## Across processes
 

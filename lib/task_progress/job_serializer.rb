@@ -9,12 +9,12 @@ class TaskProgress
   # Lets a tree from TaskProgress.handoff go to an ActiveJob as an argument like any other - no
   # ids to pass, nothing to look up:
   #
-  #     import = TaskProgress.handoff("Importing", cancelable: true)
-  #     ImportJob.perform_later(upload, import)
+  #     progress = TaskProgress.handoff("Importing", cancelable: true)
+  #     ImportJob.perform_later(csv_import, progress)
   #
   #     class ImportJob < ApplicationJob
-  #       def perform(upload, import)
-  #         import.subtask("Rows", total: upload.rows) { |rows| ... }
+  #       def perform(csv_import, progress)
+  #         progress.subtask("Rows", total: csv_import.rows.size) { |rows| ... }
   #       end
   #     end
   #

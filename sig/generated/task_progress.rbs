@@ -93,8 +93,8 @@ class TaskProgress
   # every `poll` seconds - so it works across processes too. With a block, the block is the
   # root's work, as with `cli`.
   #
-  #     TaskProgress.broadcast(import, "Importing") { |root| ... }   # in a Rails job
-  #     <%= task_progress_tree import %>                               # in its page
+  #     TaskProgress.broadcast(csv_import, "Importing") { |root| ... }   # in a Rails job
+  #     <%= task_progress_tree @csv_import %>                              # in its page
   #
   # In Rails, the target is a record, and the rest comes from RailsDefaults: Turbo::StreamsChannel,
   # Rails.cache and the route the Railtie adds. Outside Rails the target is the element's id, and

@@ -702,12 +702,14 @@ A tree can be drawn by Turbo, with no JavaScript of your own: the server draws i
 ### In Rails
 
 ```ruby
-TaskProgress.broadcast(import, "Importing") { |root| ... }    # in a job, anywhere
+TaskProgress.broadcast(csv_import, "Importing") { |root| ... }    # in a job, anywhere
 ```
 
 ```erb
-<%= task_progress_tree @import %>                               <%# in its page %>
+<%= task_progress_tree @csv_import %>                               <%# in its page %>
 ```
+
+The tree belongs to a record - `csv_import` is a `CsvImport`, but any Active Record model will do, usually the one whose page shows the progress. The record names the Action Cable stream, the element's id, and the cache entry the page draws from first.
 
 Then put `task_tree.css` on the page, and import `task_progress_clock.js` for elapsed times to tick. The Railtie serves `js/` as it is at `/task_progress/js` (`config.task_progress.js_path`, nil for none): `<link rel="stylesheet" href="/task_progress/js/task_tree.css">`, and `import "task_progress/clock"` - pinned already, with importmap-rails.
 

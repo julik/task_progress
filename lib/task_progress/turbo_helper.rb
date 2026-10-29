@@ -8,7 +8,7 @@ class TaskProgress
     # as it stood at its last frame, and subscribed to every frame after that. Needs turbo-rails,
     # and `task_tree.css` on the page - plus `task_progress_clock.js`, for elapsed times to tick
     #
-    #     <%= task_progress_tree @import %>
+    #     <%= task_progress_tree @csv_import %>
     #: (untyped, ?store: untyped) -> String
     def task_progress_tree(record, store: ::Rails.cache) # steep:ignore
       drawn = store.read(RailsDefaults.key(record)) || %(<div id="#{ERB::Util.html_escape(RailsDefaults.id(record))}" class="tree"></div>)

@@ -7,7 +7,7 @@ class TaskProgress
     # as it stood at its last frame, and subscribed to every frame after that. Needs turbo-rails,
     # and `task_tree.css` on the page - plus `task_progress_clock.js`, for elapsed times to tick
     #
-    #     <%= task_progress_tree @import %>
+    #     <%= task_progress_tree @csv_import %>
     # : (untyped, ?store: untyped) -> String
     def task_progress_tree: (untyped, ?store: untyped) -> String
   end
