@@ -7,6 +7,7 @@ Whole setups to copy from, start to end. The [README](README.md) has the short v
 - [The same video on an Inertia page, with React](#the-same-video-on-an-inertia-page-with-react)
 - [Videos transcoded in subprocesses, drawn in one terminal](#videos-transcoded-in-subprocesses-drawn-in-one-terminal)
 - [A Rails action that streams its own progress to React](#a-rails-action-that-streams-its-own-progress-to-react)
+- [Upload progress, all in the browser](#upload-progress-all-in-the-browser)
 
 Every Rails recipe leans on what the Railtie sets up by itself: the browser client served at `/task_progress/js`, trees as job arguments, and the `task_progress_tree` helper.
 
@@ -355,3 +356,58 @@ Or on a page that is not a React app, with no JSX and no build step:
 ```
 
 `useTaskTree(url)` hands you the tree to draw your own way: `tree.rows()` is what to draw, and `rowView(tree, row)` from `row_view.js` what each row says. A tree of thousands of tasks folds what is done and what waits into a row each, so a big report draws as a handful of rows.
+
+## Upload progress, all in the browser
+
+Files going up from a form, a bar for each, with no tree on the server and nothing to set up there. The tree lives in the page: `LocalTasks` keeps it, `trackUpload` follows an `XMLHttpRequest` - `fetch` reports nothing about a body going up - and the renderers draw it as it changes.
+
+**React:**
+
+```jsx
+import { useState } from "react"
+import { LocalTasks, trackUpload } from "task_progress/local_tasks"
+import { TaskTreeView } from "task_progress/react"
+
+function upload(files) {
+  const uploads = new LocalTasks("Uploading", { cancelable: true })
+  for (const file of files) {
+    const xhr = new XMLHttpRequest()
+    xhr.open("PUT", `/attachments/${encodeURIComponent(file.name)}`)
+    trackUpload(xhr, uploads.root.subtask(file.name, { unit: "bytes", cancelable: true }), { abortOnCancel: true })
+    xhr.send(file)
+  }
+  return uploads
+}
+
+export function Uploader() {
+  const [uploads, setUploads] = useState(null)
+  return <>
+    <input type="file" multiple onChange={(e) => setUploads(upload(e.target.files))} />
+    {uploads && <div className="tree"><TaskTreeView local={uploads} /></div>}
+  </>
+}
+```
+
+**Stimulus** - the same `upload(files)`, drawn by the `task-tree` controller through an outlet:
+
+```html
+<input type="file" multiple data-controller="uploader" data-action="uploader#upload" data-uploader-task-tree-outlet="#uploads">
+<div class="tree" id="uploads" data-controller="task-tree"></div>
+```
+
+```js
+// app/javascript/controllers/uploader_controller.js
+export default class extends Controller {
+  static outlets = ["task-tree"]
+  upload(event) { this.taskTreeOutlet.show(upload(event.target.files)) }
+}
+```
+
+That is all of it. What you get:
+
+- A row per file, with bytes sent, the rate and the time left, under a row for the lot. Put `task_tree.css` on the page for them.
+- A file is done when the server answers 2xx, not when the last byte has gone out. Any other answer fails it with the status, and so do a network error and a timeout.
+- Every cancel button works here, with nothing on the server to ask: a file's button aborts its request, and the top one aborts them all.
+- The top row finishes when you say so. To have it end with the files, collect `task.whenFinished()` from each `trackUpload` and close it once all have ended: `Promise.all(endings).then(() => uploads.root.done())`. It resolves with how the task ended - `"done"`, `"failed"` or `"canceled"` - if you want a failure to fail the lot.
+
+Uploading to S3, or to Active Storage's direct uploads, is the same `XMLHttpRequest`, with another URL and its headers. When the files are a step in a job the server tracks, graft the uploads under that job's task instead - see [Tasks that run in the browser](MANUAL.md#uploads) in the MANUAL.

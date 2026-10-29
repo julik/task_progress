@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { TaskTree } from "../../js/task_tree.js"
+import { TaskTree, followLocal } from "../../js/task_tree.js"
 import { LocalTasks, trackUpload } from "../../js/local_tasks.js"
 import { rowView } from "../../js/row_view.js"
 
@@ -174,4 +174,27 @@ test("whenFinished settles with how the task ended", async () => {
   b.fail(new Error("nope"))
   assert.deepEqual(await both, ["done", "failed"])
   assert.equal(await a.whenFinished(), "done", "and at once, once it has")
+})
+
+test("followLocal draws tasks from this browser on their own, and cancels them here", () => {
+  const uploads = new LocalTasks("Uploads", { cancelable: true })
+  const early = uploads.root.subtask("a.bin", { unit: "bytes", cancelable: true })
+  const drawn = []
+  const following = followLocal(uploads, (tree) => drawn.push([...tree.rows()].map((node) => rowView(tree, node))), { schedule: (fn) => fn() })
+  assert.deepEqual([...following.tree.rows()].map((node) => node.name), ["Uploads", "a.bin"], "what was there before is drawn at once")
+  const xhr = new FakeXHR()
+  trackUpload(xhr, uploads.root.subtask("b.bin", { unit: "bytes", cancelable: true }), { abortOnCancel: true })
+  xhr.progress(50, 100)
+  const rows = drawn.at(-1)
+  assert.deepEqual(rows.map((row) => [row.name, row.measure]), [["Uploads", "25%"], ["a.bin", "0%"], ["b.bin", "50 bytes / 100 bytes"]])
+  assert.ok(rows.every((row) => row.local), "the root too - there is no server to ask")
+  following.tree.cancelLocal(rows[2].path, "Canceled in this browser")
+  assert.equal(xhr.aborted, true)
+  following.tree.cancelLocal([], "Canceled in this browser")
+  assert.equal(early.status, "canceled")
+  assert.equal(following.tree.root.status, "canceled")
+  following.close()
+  const count = drawn.length
+  uploads.root.subtask("c.bin")
+  assert.equal(drawn.length, count, "closed, it stops drawing")
 })

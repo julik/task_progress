@@ -6,6 +6,7 @@
 //   followPollingAt(url, onChange)       a TaskProgress::Poll endpoint, for where SSE does not get through
 //   followProgress(progress, onChange)   what TaskProgress.for_page hands a page - SSE, or polling if that fails
 //   batchFeed(onChange)              the same, for batches you get some other way
+//   followLocal(localTasks, onChange)    tasks running in this browser, on their own - uploads, say
 //   tree.graft(path, localTasks)         draws tasks running in this browser under a server task
 
 import { RenderQueue } from "./render_queue.js"
@@ -56,6 +57,7 @@ export class TaskTree {
     this.offset = null
     this.grafts = []
     this.onLocalChange = null // set by a RenderQueue, to draw what a graft changes
+    this.local = null // the LocalTasks this whole tree mirrors, see followLocal
   }
 
   // Now, by the clock of whoever wrote the tree - so an elapsed time is never off by the skew
@@ -113,6 +115,7 @@ export class TaskTree {
   // Cancels a task running in this browser, by its path in this tree. Server tasks are not
   // this tree's to end - see requestCancel
   cancelLocal(path, reason) {
+    if (this.local) return this.local.at(path)?.cancel(reason)
     const graft = this.grafts.find((g) => key([...g.anchor, g.id]) === key(path.slice(0, g.anchor.length + 1)))
     graft?.local.at(path.slice(graft.anchor.length + 1))?.cancel(reason)
   }
@@ -341,6 +344,15 @@ export function followEventSourceAt(url, onChange, { onUnreachable, unreachableA
 // Follows what TaskProgress.for_page hands a page - { events, poll, cancel, snapshot } - drawn
 // from its snapshot at once. `transport` is "sse", "poll", or "auto": SSE, falling back to
 // polling (every `poll` seconds, or long polling with `wait`) when the stream cannot be reached. `tree` is always the one being followed now
+// Draws tasks that run in this browser on their own, with no server tree around them - uploads,
+// say. Every row is local: its cancel button cancels the task here
+export function followLocal(local, onChange, options = {}) {
+  const feed = batchFeed(onChange, { ...options, initial: local.squash() })
+  feed.tree.local = local
+  const unsubscribe = local.subscribe((batch) => feed.push(batch))
+  return { tree: feed.tree, close: () => { unsubscribe(); feed.close() } }
+}
+
 export function followProgress(progress, onChange, { transport = "auto", poll = 1, wait = 0, ...options } = {}) {
   const initial = progress.snapshot
   const polling = (from) => followPollingAt(progress.poll, onChange, { poll, wait, ...options, initial: from })

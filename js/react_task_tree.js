@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { followEventSourceAt, followPollingAt, followProgress, requestCancel } from "./task_tree.js"
+import { followEventSourceAt, followLocal, followPollingAt, followProgress, requestCancel } from "./task_tree.js"
 import { rowView, CANCEL_ICON } from "./row_view.js"
 
 // No JSX, so it runs as it is - in a Vite app, or straight off an import map with no build step
@@ -12,7 +12,8 @@ const FINISHED = new Set(["done", "failed", "canceled"])
 // Follows a tree: what TaskProgress.for_page hands a page - { events, poll, cancel, snapshot },
 // drawn from its snapshot at once - or the url of a TaskProgress::SSE stream, or of a
 // TaskProgress::Poll endpoint given `poll` (seconds between polls) or `wait` (seconds to
-// long-poll). `transport` picks for a for_page object, see followProgress.
+// long-poll). `transport` picks for a for_page object, see followProgress. Or a LocalTasks, for
+// tasks that run in this browser alone - uploads, say - drawn as they change, with no server.
 //
 // Returns { tree, rows, cancel }: the tree, what to draw (see rowView), and a function that asks
 // for a row's task to be canceled - a task running in this browser is canceled here. `onComplete`
@@ -23,10 +24,11 @@ export function useTaskTree(source, { transport, poll = 0, wait = 0, grafts = NO
   const [state, setState] = useState({ tree: null, version: 0 })
   const callbacks = useRef({})
   callbacks.current = { onComplete, onFail }
-  const progress = typeof source === "string" ? null : source
+  const local = typeof source?.subscribe === "function" ? source : null
+  const progress = typeof source === "string" || local ? null : source
   const url = typeof source === "string" ? source : null
   // A for_page object is a new object every render; what it points at is what matters
-  const followKey = progress ? `${progress.events} ${progress.poll}` : url
+  const followKey = local ? local.log : progress ? `${progress.events} ${progress.poll}` : url
   useEffect(() => {
     setState({ tree: null, version: 0 })
     if (!followKey) return
@@ -39,7 +41,9 @@ export function useTaskTree(source, { transport, poll = 0, wait = 0, grafts = NO
       if (status === "done") callbacks.current.onComplete?.(tree)
       else callbacks.current.onFail?.(tree)
     }
-    const following = progress
+    const following = local
+      ? followLocal(local, draw)
+      : progress
       ? followProgress(progress, draw, { transport, poll: poll || 1, wait })
       : poll || wait ? followPollingAt(url, draw, { poll: poll || 1, wait }) : followEventSourceAt(url, draw)
     return () => following.close()
@@ -89,12 +93,12 @@ function Row({ row, onCancel, offered }) {
 }
 
 // The tree as rows, styled by task_tree.css. Give it `progress` - what TaskProgress.for_page
-// hands a page - or a `url`, as useTaskTree takes them. With a `url`, `cancelUrl` and
+// hands a page - or a `url`, as useTaskTree takes them, or `local`, a LocalTasks. With a `url`, `cancelUrl` and
 // `cancelToken` say where cancel buttons ask; with `progress` they ask where it says. For
 // anything else, pass `onCancel(row)` - return false from it to release the button. `onComplete`
 // and `onFail` are called once the root has finished
-export function TaskTreeView({ progress, url, cancelUrl, cancelToken, onCancel, onComplete, onFail, grafts, transport, poll, wait }) {
-  const { tree, rows, cancel, canCancel } = useTaskTree(progress ?? url, { transport, poll, wait, grafts, onComplete, onFail })
+export function TaskTreeView({ progress, url, local, cancelUrl, cancelToken, onCancel, onComplete, onFail, grafts, transport, poll, wait }) {
+  const { tree, rows, cancel, canCancel } = useTaskTree(local ?? progress ?? url, { transport, poll, wait, grafts, onComplete, onFail })
   if (!tree) return null
   const remote = !progress && cancelUrl && (async (row) => {
     try { return (await requestCancel(cancelUrl, row.path, { token: cancelToken })).ok } catch { return false }

@@ -3,7 +3,7 @@ import TaskTreeController from "/task_progress/stimulus_controller.js"
 import { createTaskTreeRoot } from "/task_progress/react_task_tree.js"
 import { TaskTree } from "/task_progress/task_tree.js"
 import { nextFrame } from "/task_progress/render_queue.js"
-import { LocalTasks } from "/task_progress/local_tasks.js"
+import { LocalTasks, trackUpload } from "/task_progress/local_tasks.js"
 // Imported by name, though only defining the element matters: Assiette's integrity hash skips a
 // bare `import "…"`, which it still fingerprints when serving, and the browser blocks the page
 import { TaskProgressClock } from "/task_progress/task_progress_clock.js" // eslint-disable-line no-unused-vars
@@ -93,6 +93,31 @@ async function hashFiles(work, files) {
   }
   work.root.done()
 }
+
+// Uploads from this browser, drawn with no tree on the server at all - what RECIPES.md shows. The
+// bench throws the files away, and answers too-big.bin with a 413
+$("upload").addEventListener("click", () => {
+  current = null
+  $("job-title").textContent = "Upload files"
+  $("job-meta").textContent = "three files, PUT from this browser - no job, and no tree on the server"
+  $("cancel").hidden = true
+  $("graft").hidden = true
+  document.querySelectorAll(".scenario").forEach((b) => b.classList.remove("current"))
+  $("turbo-pane").innerHTML = '<div class="tree" id="turbo-tree"></div>'
+
+  const uploads = new LocalTasks("Upload from this browser", { cancelable: true })
+  application.getControllerForElementAndIdentifier($("stimulus-tree"), "task-tree").show(uploads)
+  react.render({ local: uploads })
+  const files = [["photos.zip", 24], ["video.mp4", 64], ["too-big.bin", 8]].map(([name, megabytes]) => new File([new Uint8Array(megabytes * 1024 * 1024)], name))
+  const endings = files.map((file) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("PUT", `/uploads/${encodeURIComponent(file.name)}`)
+    const task = trackUpload(xhr, uploads.root.subtask(file.name, { unit: "bytes", cancelable: true }), { abortOnCancel: true })
+    xhr.send(file)
+    return task.whenFinished()
+  })
+  Promise.all(endings).then((ends) => ends.every((end) => end === "done") ? uploads.root.done() : uploads.root.fail(new Error("Not every file made it")))
+})
 
 $("cancel").addEventListener("click", async () => {
   if (current) await fetch(`/jobs/${current.id}/cancel`, { method: "POST" })

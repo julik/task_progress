@@ -163,4 +163,20 @@ class BrowserTest < Minitest::Test
     assert_equal "canceled", row("#react-tree", "video.mp4")[0]
     assert_empty @errors
   end
+
+  def test_uploads_from_the_page_are_drawn_with_no_tree_on_the_server
+    start("waiting")
+    page.at_css("#upload").click
+    wait_for(message: "the uploads never replaced the job") { row("#stimulus-tree", "video.mp4") && row("#react-tree", "video.mp4") }
+    # The bench takes a second to answer, every byte sent or not - long enough to cancel in
+    press_cancel("#react-tree", "video.mp4")
+    wait_for(message: "the uploads never ended") { %w[#stimulus-tree #react-tree].all? { rows(it).first&.first == "failed" } }
+    %w[#stimulus-tree #react-tree].each do |pane|
+      assert_equal ["Upload from this browser", "photos.zip", "video.mp4", "too-big.bin"], rows(pane).map { it[1] }
+      assert_equal "done", row(pane, "photos.zip")[0]
+      assert_equal "canceled", row(pane, "video.mp4")[0], "one cancel, aborting the request, drawn in both panes"
+      assert_equal "failed", row(pane, "too-big.bin")[0], "a 413 fails the upload"
+    end
+    assert_empty @errors
+  end
 end

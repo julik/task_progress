@@ -28,7 +28,7 @@ export function rowView(tree, node) {
   const icon = glyph ? `<span>${glyph}</span>` : '<span class="spin"></span>'
   return {
     key: pathKey(node.path), path: node.path, depth: node.path.length, name: node.name, status, stale: node.stale,
-    local: node.path.some((id) => String(id).startsWith("_")), // runs in this browser, see LocalTasks
+    local: !!tree.local || node.path.some((id) => String(id).startsWith("_")), // runs in this browser, see LocalTasks
     cancelable: !!node.cancelable && !FINISHED.has(node.status),
     percent, indeterminate, measure, icon,
     message: [node.attempt > 1 ? `attempt ${node.attempt}` : null,

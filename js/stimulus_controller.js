@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { followEventSourceAt, followPollingAt, followProgress, requestCancel, pathKey } from "./task_tree.js"
+import { followEventSourceAt, followLocal, followPollingAt, followProgress, requestCancel, pathKey } from "./task_tree.js"
 import { rowView, CANCEL_ICON } from "./row_view.js"
 
 // Draws a tree. Give it what TaskProgress.for_page hands a page, as the progress value - it draws
@@ -18,7 +18,8 @@ import { rowView, CANCEL_ICON } from "./row_view.js"
 // is one, signed with the cancel-token value. A task running in this browser is canceled here.
 //
 // `graft(path, localTasks)` draws tasks running in this browser under a server task, until the
-// url value changes - see TaskTree#graft. Reach the controller with
+// url value changes - see TaskTree#graft. `show(localTasks)` draws them on their own instead, with
+// no server at all - uploads, say. Reach the controller through an outlet, or with
 // application.getControllerForElementAndIdentifier(element, "task-tree")
 export default class extends Controller {
   static values = { url: String, progress: Object, cancelUrl: String, cancelToken: String, poll: Number, wait: Number }
@@ -27,12 +28,14 @@ export default class extends Controller {
 
   progressValueChanged() { this.#follow() }
 
-  #follow() {
+  #follow(local = null) {
     this.#stop()
     this.rows = new Map()
     this.keys = null
     this.element.replaceChildren()
     const draw = (tree, changes) => this.render(tree, changes)
+    this.local = local
+    if (local) return (this.following = followLocal(local, draw))
     const progress = this.progressValue
     if (progress?.events || progress?.poll) {
       const transport = this.pollValue || this.waitValue ? "poll" : "auto"
@@ -46,7 +49,9 @@ export default class extends Controller {
 
   // Stimulus does not tell a controller its values again when its element comes back - moved in
   // the page, or kept across visits with data-turbo-permanent - so it picks up where it was
-  connect() { if (!this.following) this.#follow() }
+  connect() { if (!this.following) this.#follow(this.local) }
+
+  show(local) { this.#follow(local) }
 
   disconnect() { this.#stop() }
 

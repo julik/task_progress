@@ -1,4 +1,4 @@
-import { followProgress, TaskTree, type Progress, type Batch } from "task_progress"
+import { followLocal, followProgress, TaskTree, type Progress, type Batch } from "task_progress"
 import { useTaskTree, TaskTreeView, createTaskTreeRoot, type Progress as PageProgress, type RowView } from "task_progress/react"
 import TaskTreeController from "task_progress/stimulus"
 import { LocalTasks, trackUpload } from "task_progress/local_tasks"
@@ -14,16 +14,19 @@ for (const node of tree.rows()) rowView(tree, node).percent.toFixed()
 const work = new LocalTasks("Hash", { cancelable: true })
 const file = work.root.subtask("a.bin", { unit: "bytes" })
 if (file) trackUpload(new XMLHttpRequest(), file, { abortOnCancel: true }).advance(10)
+followLocal(work, (local) => console.log(local.local?.log)).close()
 
 export function Page({ progress }: { progress: Progress }) {
   const { rows, cancel } = useTaskTree(progress, { onComplete: () => console.log("done") })
   return <div className="tree">
     <TaskTreeView progress={progress} onComplete={() => {}} />
+    <TaskTreeView local={work} />
     {rows.map((row) => <button key={row.key} onClick={() => cancel(row)}>{row.name}</button>)}
   </div>
 }
 createTaskTreeRoot(document.body).render({ progress })
-class X extends TaskTreeController {}
+class X extends TaskTreeController { connect() { this.show(work) } }
+useTaskTree(work)
 const fromReact: PageProgress = progress
 const row: RowView | undefined = undefined
 console.log(outcome, X, fromReact, row)

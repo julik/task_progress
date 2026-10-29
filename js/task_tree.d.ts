@@ -80,6 +80,8 @@ export class TaskTree {
   fraction(node: Node): number
   percentOf(node: Node): number
   now(): number
+  /** The LocalTasks this whole tree mirrors, see followLocal */
+  local: import("./local_tasks.js").LocalTasks | null
   graft(path: Path, local: import("./local_tasks.js").LocalTasks): () => void
   cancelLocal(path: Path, reason?: string): void
 }
@@ -102,6 +104,8 @@ export function batchFeed(onChange: OnChange, options?: FeedOptions): Following 
 export function followEventSourceAt(url: string, onChange: OnChange, options?: FeedOptions & { onUnreachable?: () => void; unreachableAfter?: number }): Following
 /** `poll` and `wait` are in seconds */
 export function followPollingAt(url: string, onChange: OnChange, options?: FeedOptions & { poll?: number; wait?: number }): Following
+/** Draws tasks that run in this browser on their own, with no server tree around them */
+export function followLocal(local: import("./local_tasks.js").LocalTasks, onChange: OnChange, options?: FeedOptions): Following
 export function followProgress(progress: Progress, onChange: OnChange, options?: FeedOptions & { transport?: "auto" | "sse" | "poll"; poll?: number; wait?: number; unreachableAfter?: number }): Following
 export function requestCancel(url: string, path: Path, options?: { token?: string }): Promise<Response>
 export function humanBytes(n: number): string

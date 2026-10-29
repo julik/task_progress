@@ -626,6 +626,8 @@ Only this page sees a graft - other viewers, the terminal and the server's own p
 
 React takes grafts as a prop, `<TaskTreeView url={url} grafts={[{ path, local: work }]} />` - an array written inline is fine.
 
+Browser work needs no server task to hang from. `followLocal(work, onChange)` follows it on its own, as `followProgress` follows a server's tree; `<TaskTreeView local={work} />` and the Stimulus controller's `show(work)` draw it. Every row of such a tree is local, the top one included, so each cancel button cancels here. [Upload progress, all in the browser](RECIPES.md#upload-progress-all-in-the-browser) is the whole of it.
+
 #### Uploads
 
 The case nearly everyone has: the server opens a task for the files it waits on, and the browser uploads them. `trackUpload(xhr, task)` follows an `XMLHttpRequest`'s upload events - `fetch` has none for request bodies - and ends the task the way the request ends:
@@ -673,7 +675,7 @@ import TaskTreeController from "/task_progress/stimulus_controller.js"
 application.register("task-tree", TaskTreeController)
 ```
 
-Changing the url value follows the new stream. Draws once a frame at most, and then only the rows that changed. Fires `task-tree:render` after each draw, and `task-tree:cancel` (with the task's `path` and `name`) when a cancel button is pressed - prevent it to handle the cancel yourself; otherwise it creates a cancellation at the cancel-url value.
+`show(localTasks)` draws tasks running in this browser on their own, in place of a stream, until a value changes - from an outlet, `this.taskTreeOutlet.show(uploads)`. Changing the url value follows the new stream. Draws once a frame at most, and then only the rows that changed. Fires `task-tree:render` after each draw, and `task-tree:cancel` (with the task's `path` and `name`) when a cancel button is pressed - prevent it to handle the cancel yourself; otherwise it creates a cancellation at the cancel-url value.
 
 ### React
 
@@ -682,6 +684,7 @@ import { TaskTreeView, useTaskTree, createTaskTreeRoot } from "/task_progress/re
 
 <TaskTreeView url="/jobs/42/progress" cancelUrl="/jobs/42/cancellations" cancelToken={token} />
 <TaskTreeView url="/jobs/42/progress" onCancel={async (row) => ...} />  // return false to release the button
+<TaskTreeView local={uploads} />                                         // a LocalTasks, with no server
 const tree = useTaskTree(url, { poll, wait, grafts })                    // draw it yourself
 createTaskTreeRoot(element).render({ url, cancelUrl, cancelToken })      // on a page that is not a React app
 ```

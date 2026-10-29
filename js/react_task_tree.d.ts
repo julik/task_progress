@@ -29,12 +29,14 @@ export interface UseTaskTree {
   canCancel: boolean
 }
 
-/** Follows what TaskProgress.for_page hands a page, or the url of an SSE stream or Poll endpoint */
-export function useTaskTree(source: Progress | string | null | undefined, options?: FollowOptions): UseTaskTree
+/** Follows what TaskProgress.for_page hands a page, the url of an SSE stream or Poll endpoint, or tasks running in this browser */
+export function useTaskTree(source: Progress | string | LocalTasks | null | undefined, options?: FollowOptions): UseTaskTree
 
 export interface TaskTreeViewProps extends FollowOptions {
   progress?: Progress
   url?: string
+  /** Tasks running in this browser, drawn on their own */
+  local?: LocalTasks
   cancelUrl?: string
   cancelToken?: string
   /** Return false to release the button */

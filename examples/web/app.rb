@@ -22,6 +22,8 @@ require_relative "../scenarios"
 #   GET  /jobs/:id/turbo         its tree as Turbo Streams over SSE, for <turbo-stream-source>
 #   GET  /jobs/:id/events        its tree as SSE; with ?drop_after=N the stream is cut after N
 #                                frames, so the browser has to reconnect and resume
+#   PUT  /uploads/:name          takes a file and throws it away, a little later; one named
+#                                too-big.* gets a 413, for a failed upload to look at
 class BenchApp
   PUBLIC = File.expand_path("public", __dir__)
   PAGE = ERB.new(File.read(File.join(PUBLIC, "index.html.erb")), trim_mode: "<>")
@@ -74,6 +76,11 @@ class BenchApp
         end
       end
       json(describe(job), 201)
+    in ["PUT", %r{\A/uploads/([^/]+)\z}]
+      IO.copy_stream(request.body, File::NULL)
+      # An answer that takes a moment, so the page shows every byte sent and the upload not yet through
+      sleep 1
+      $1.start_with?("too-big") ? json({error: "too big"}, 413) : [204, {}, []]
     in ["POST", %r{\A/jobs/(\w+)/cancel\z}]
       job = find($1) or return json({error: "no such job"}, 404)
       job.thread.raise(Interrupt, "Cancelled from the bench") if job.thread.alive?
