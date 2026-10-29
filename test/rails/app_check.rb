@@ -9,6 +9,7 @@ require "action_cable/engine"
 require "active_model"
 require "turbo-rails"
 require "importmap-rails"
+require "assiette"
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 require "task_progress"
 require "rack/mock"
@@ -222,6 +223,18 @@ class RailsAppCheck < Minitest::Test
     assert_equal 200, Rack::MockRequest.new(Rails.application).get(map["task_progress/stimulus"]).status
     preloaded = Rails.application.importmap.preloaded_module_paths(resolver: ActionController::Base.helpers)
     assert_empty preloaded.grep(/task_progress/), "pages without React must not fetch the React part"
+  end
+
+  def test_the_client_is_exposed_to_assiette_by_handle
+    assert_equal TaskProgress.js_path, Rails.application.config.assiette.exposed["@task_progress"]
+
+    Dir.mktmpdir do |root|
+      File.write(File.join(root, "app.js"), %(import { TaskTree } from "@task_progress/task_tree.js"\n))
+      handler = Assiette::AssetHandler.new(root:)
+      Rails.application.config.assiette.exposed.each { |handle, dirs| handler.expose(handle, dirs) }
+      served = handler.dependency_graph.rewrite_content("app.js", File.read(File.join(root, "app.js")))
+      assert_match %r{from "\./@task_progress/task_tree\.js\?s=\h{8}"}, served
+    end
   end
 
   def test_the_vendor_task_copies_the_client

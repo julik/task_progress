@@ -97,9 +97,10 @@ Where SSE does not get through, `TaskProgress::Poll` answers plain GETs - with a
 
 ## Getting the browser client
 
-The JS ships inside the gem, at the gem's version, and is not on npm. Take it from the gem in one of three ways:
+The JS ships inside the gem, at the gem's version, and is not on npm. Take it from the gem in one of four ways:
 
 - **Rails with importmap-rails:** nothing to do. The Railtie serves `js/` at `/task_progress/js` and pins it in your import map as `task_progress`, `task_progress/react`, `task_progress/stimulus`, `task_progress/local_tasks`, `task_progress/row_view` and `task_progress/clock`. Add `<link rel="stylesheet" href="/task_progress/js/task_tree.css">` for the styles.
+- **Rails with [Assiette](https://github.com/julik/assiette):** nothing to do either. The Railtie exposes `js/` as `@task_progress`, so your modules import `@task_progress/stimulus_controller.js` and Assiette fingerprints it like your own; `assiette_stylesheet_tag("@task_progress/task_tree.css")` for the styles.
 - **A bundler - Vite, esbuild, Inertia:** copy it into your app, and install the copy as a package:
 
   ```

@@ -1,12 +1,12 @@
 import { Application } from "@hotwired/stimulus"
-import TaskTreeController from "/task_progress/stimulus_controller.js"
-import { createTaskTreeRoot } from "/task_progress/react_task_tree.js"
-import { TaskTree } from "/task_progress/task_tree.js"
-import { nextFrame } from "/task_progress/render_queue.js"
-import { LocalTasks, trackUpload } from "/task_progress/local_tasks.js"
+import TaskTreeController from "@task_progress/stimulus_controller.js"
+import { createTaskTreeRoot } from "@task_progress/react_task_tree.js"
+import { TaskTree } from "@task_progress/task_tree.js"
+import { nextFrame } from "@task_progress/render_queue.js"
+import { LocalTasks, trackUpload } from "@task_progress/local_tasks.js"
 // Imported by name, though only defining the element matters: Assiette's integrity hash skips a
 // bare `import "…"`, which it still fingerprints when serving, and the browser blocks the page
-import { TaskProgressClock } from "/task_progress/task_progress_clock.js" // eslint-disable-line no-unused-vars
+import { TaskProgressClock } from "@task_progress/task_progress_clock.js" // eslint-disable-line no-unused-vars
 import * as Turbo from "@hotwired/turbo"
 
 // Turbo draws the third pane from HTML the server renders - its streams and its cancel forms,

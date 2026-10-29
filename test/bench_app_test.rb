@@ -165,6 +165,6 @@ class BenchAppTest < Minitest::Test
     links = page.scan(/(?:href|src)="(\/[^"]+\?s=\w+)"/).flatten
     assert_operator links.length, :>=, 8
     links.each { assert_equal 200, @request.get(it).status, it }
-    assert_includes links.join, "/task_progress/task_tree.js"
+    assert_includes links.join, "/@task_progress/task_tree.js"
   end
 end

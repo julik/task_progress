@@ -10,7 +10,7 @@ require_relative "../scenarios"
 # The bench behind bin/dev. Starts scenario jobs in this process and serves each tree as SSE.
 #
 #   GET  /                       the bench page; its scripts and styles come from Assiette, with
-#                                the gem's own JS mounted at /task_progress
+#                                the gem's own JS exposed as @task_progress
 #   GET  /scenarios              what can be started
 #   GET  /jobs                   the jobs started lately, newest first
 #   POST /jobs?scenario=&speed=  starts one
@@ -45,7 +45,7 @@ class BenchApp
     @started = 0
     @lock = Mutex.new
     @tokens = TaskProgress::Token.new(SecureRandom.hex(32))
-    @assets = Assiette::AssetHandler.new(root: PUBLIC, additional_directory_mappings: {"/task_progress" => TaskProgress.js_path})
+    @assets = Assiette::AssetHandler.new(root: PUBLIC).expose("@task_progress", TaskProgress.js_path)
     @app = Assiette::Server.new(method(:route), @assets)
   end
 

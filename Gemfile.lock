@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/julik/assiette.git
-  revision: 8a94b88a756c182303f8c319716b5533f8feaaf1
+  revision: 87b0fc9610e820b07a5f2d3e2a057bc31760e020
   specs:
     assiette (0.6.1)
       actionpack (>= 7.2)

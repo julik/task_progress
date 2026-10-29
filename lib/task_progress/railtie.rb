@@ -3,7 +3,8 @@
 class TaskProgress
   # Loaded only inside a Rails app: trees as job arguments (see JobSerializer), the
   # `task_progress_tree` helper in every view, the browser client at `/task_progress/js` (and on the
-  # asset path, and pinned in the import map when importmap-rails is in use), a route for the
+  # asset path, pinned in the import map when importmap-rails is in use, and exposed to Assiette as
+  # `@task_progress` when that is), a route for the
   # cancel buttons - at `/task_progress/cancellations`, unless `config.task_progress.cancellations_path`
   # says elsewhere, or is nil for none - and `rails task_progress:vendor`
   class Railtie < ::Rails::Railtie
@@ -14,6 +15,8 @@ class TaskProgress
     config.task_progress.js_path = "/task_progress/js"
     # Pins `task_progress`, `task_progress/react` and the rest to it, when importmap-rails is in use
     config.task_progress.importmap = true
+    # Exposes it to Assiette as `@task_progress`, when Assiette is in use
+    config.task_progress.assiette = true
     # Where `rails task_progress:vendor` copies the client to, for a bundler to take it from
     config.task_progress.vendor_path = "vendor/javascript/task_progress"
     # Where pages get handed-off trees from, by the links TaskProgress.for_page hands out
@@ -45,6 +48,14 @@ class TaskProgress
       options = app.config.task_progress
       if app.config.respond_to?(:importmap) && options.importmap && options.js_path
         app.config.importmap.paths << File.expand_path("../../config/importmap.rb", __dir__)
+      end
+    end
+
+    # Before the app's own initializers, where Assiette's generated one builds the handler and
+    # exposes whatever is in `config.assiette.exposed`
+    initializer "task_progress.assiette", before: :load_config_initializers do |app|
+      if app.config.respond_to?(:assiette) && app.config.task_progress.assiette
+        app.config.assiette.exposed["@task_progress"] = TaskProgress.js_path
       end
     end
 

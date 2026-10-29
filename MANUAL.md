@@ -538,10 +538,14 @@ A cancel asked of a tree no worker has taken up yet waits for one, which takes i
 
 ## The browser client
 
-Plain ES modules in `js/`, shipped with the gem: `TaskProgress.js_path`. Serve the directory under any prefix - imports inside it are relative. With [Assiette](https://github.com/julik/assiette):
+Plain ES modules in `js/`, shipped with the gem: `TaskProgress.js_path`. Serve the directory under any prefix - imports inside it are relative. With [Assiette](https://github.com/julik/assiette), expose it by handle:
 
 ```ruby
-use Assiette::Server, root: "public", additional_directory_mappings: {"/task_progress" => TaskProgress.js_path}
+use Assiette::Server, Assiette::AssetHandler.new(root: "public").expose("@task_progress", TaskProgress.js_path)
+```
+
+```js
+import { followProgress } from "@task_progress/task_tree.js"
 ```
 
 The Stimulus controller and the React component import `@hotwired/stimulus`, `react` and `react-dom/client` by bare name - from `node_modules` in a Vite app, from the import map on a page without a build step. There is no JSX in them.
@@ -549,6 +553,8 @@ The Stimulus controller and the React component import `@hotwired/stimulus`, `re
 ### Getting it into an app
 
 **With importmap-rails** there is nothing to do. The Railtie serves `js/` at `/task_progress/js`, and pins it in the app's import map under the same names a bundler would use: `task_progress`, `task_progress/react`, `task_progress/stimulus`, `task_progress/local_tasks`, `task_progress/row_view` and `task_progress/clock`. None of them is preloaded. A pin of the same name in your `config/importmap.rb` wins. `config.task_progress.importmap = false` leaves the map alone.
+
+**With Assiette** there is nothing to do either. The Railtie puts the client in `config.assiette.exposed` as `@task_progress`, which the initializer Assiette generates hands to its handler. Import it by handle from your own modules - `import TaskTreeController from "@task_progress/stimulus_controller.js"` - and link the styles with `assiette_stylesheet_tag("@task_progress/task_tree.css")`. Assiette rewrites the import to a fingerprinted URL, the same one the client's own relative imports reach, so each module runs once. `assiette_modulepreload_tags` preloads the client along with your modules, the React part included; on pages with no import map entry for `react`, `assiette_modulepreload_tags(exposed: [])` leaves it out. `config.task_progress.assiette = false` leaves Assiette alone.
 
 **With a bundler** - Vite, esbuild, Inertia - vendor a copy:
 
