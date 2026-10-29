@@ -1,6 +1,6 @@
 # To do
 
-After 1.0.
+Not yet built, and not needed for a first release.
 
 ## One follower per tree, per process
 

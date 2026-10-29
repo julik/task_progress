@@ -557,7 +557,7 @@ $ bin/rails task_progress:vendor                  # into vendor/javascript/task_
 $ npm install ./vendor/javascript/task_progress
 ```
 
-The copy is a package of its own, named `task_progress`, with the `.d.ts` declarations next to the modules: `import { TaskTreeView } from "task_progress/react"`, `import "task_progress/task_tree.css"`. Commit it. It does not update with the gem, so run the task again after an update. Rails warns at boot while the vendored copy is older than the gem it runs with. `config.task_progress.vendor_path` moves it, and `DIR=` sends one run elsewhere.
+The copy is a package of its own, named `task_progress`, with the `.d.ts` declarations next to the modules: `import { TaskTreeView } from "task_progress/react"`, `import "task_progress/task_tree.css"`. Commit it. It does not update with the gem, so run the task again after an update. Rails warns at boot while the vendored copy is from another version than the gem it runs with. `config.task_progress.vendor_path` moves it, and `DIR=` sends one run elsewhere.
 
 Outside Rails, `task_progress vendor [DIR]` does the same - into `task_progress/` in the current directory, or `vendor/javascript/task_progress` when it is a Rails app's root. `TaskProgress.vendor_js(dir)` from Ruby. Each run replaces what the last left there. A directory holding files of anyone else's is left alone.
 
@@ -773,7 +773,7 @@ One batch per line:
 {"v":1,"log":"k7p2qd9z4m","prev":11,"seq":12,"at":1730000000.123,"ops":[[["x3k0"],"add",5],[["x3k0"],"note","Reading"]]}
 ```
 
-`v` is the version of the format, 1 for as long as 1.x lasts. Readers - `Wire` and `task_tree.js` alike - take their own version only, and drop a batch in any other the way they drop a garbled one. So in a deploy where old workers and new web processes overlap, a newer writer's tree is left alone rather than drawn wrong.
+`v` is the version of the format: 1, until a change comes that a reader of today could not ignore. Readers - `Wire` and `task_tree.js` alike - take their own version only, and drop a batch in any other the way they drop a garbled one. So in a deploy where old workers and new web processes overlap, a newer writer's tree is left alone rather than drawn wrong.
 
 | Op | Value | |
 |---|---|---|

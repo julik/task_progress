@@ -1,6 +1,6 @@
 name: Release
 
-# Pushing a tag like v1.0.0 builds the gem and publishes it to RubyGems, through trusted publishing -
+# Pushing a tag like v0.0.1 builds the gem and publishes it to RubyGems, through trusted publishing -
 # no API key in the repository. The tag must match TaskProgress::VERSION
 on:
   push:

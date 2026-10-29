@@ -19,7 +19,7 @@
 
 `bundle exec rake test` runs the Ruby tests, the JS ones (`test/js`, through Node), and the browser tests (`test/browser_test.rb`), which drive the bench in a headless Chrome through Ferrum - clicking what a person would click, and reading what they would see. They skip without a Chrome; a change to the renderers or the bench gets one there. The parity test holds the browser client's fold to the Ruby one for random trees: a change to how a tree folds or how percents work goes into `State` and `js/task_tree.js` together.
 
-A change to the wire format touches `Wire` (what a reader accepts), `js/task_tree.js`, and the op table in the MANUAL. Batches carry `v: 1`, and readers drop any other version: within 1.x, a change must stay readable by a reader of today - a new attribute it can ignore, never a new meaning for an old one. Anything else bumps `Wire::VERSION`, and that is a 2.0.
+A change to the wire format touches `Wire` (what a reader accepts), `js/task_tree.js`, and the op table in the MANUAL. Batches carry `v: 1`, and readers drop any other version: a change must stay readable by a reader of today - a new attribute it can ignore, never a new meaning for an old one. Anything else bumps `Wire::VERSION` - from 1.0 on, in a major release only. Until 1.0 the Ruby and JS APIs may still change; say so in the CHANGELOG when they do.
 
 How a big family of tasks folds into rows lives in `State#rows` and `TaskTree#rows` together, and `test/fold_test.rb` holds the two to the same rows.
 

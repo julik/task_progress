@@ -168,7 +168,7 @@ $ bin/rails task_progress:vendor
 $ npm install ./vendor/javascript/task_progress
 ```
 
-The first copies the gem's `js/` into `vendor/javascript/task_progress`, as a package named `task_progress` with TypeScript declarations; the second links it into `node_modules`, for Vite to resolve like any other. React is a peer dependency - the one your app has. Commit the vendored copy, and run the task again after updating the gem - Rails warns at boot when the copy is older than the gem.
+The first copies the gem's `js/` into `vendor/javascript/task_progress`, as a package named `task_progress` with TypeScript declarations; the second links it into `node_modules`, for Vite to resolve like any other. React is a peer dependency - the one your app has. Commit the vendored copy, and run the task again after updating the gem - Rails warns at boot when the copy is from another version of the gem.
 
 **2. One prop.**
 

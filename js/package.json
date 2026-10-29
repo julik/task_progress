@@ -1,7 +1,7 @@
 {
   "name": "task_progress",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "The browser half of the task_progress gem, vendored from it - see `task_progress vendor`",
   "license": "MIT",
   "type": "module",

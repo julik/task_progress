@@ -95,6 +95,23 @@ and draw it with the browser client that ships in `js/` (`TaskProgress.js_path`)
 
 Where SSE does not get through, `TaskProgress::Poll` answers plain GETs - with a 304 while nothing changed - and `followPollingAt` polls it. Work that runs in the browser itself can be grafted under a server task with `LocalTasks`.
 
+## Getting the browser client
+
+The JS ships inside the gem, at the gem's version, and is not on npm. Take it from the gem in one of three ways:
+
+- **Rails with importmap-rails:** nothing to do. The Railtie serves `js/` at `/task_progress/js` and pins it in your import map as `task_progress`, `task_progress/react`, `task_progress/stimulus`, `task_progress/local_tasks`, `task_progress/row_view` and `task_progress/clock`. Add `<link rel="stylesheet" href="/task_progress/js/task_tree.css">` for the styles.
+- **A bundler - Vite, esbuild, Inertia:** copy it into your app, and install the copy as a package:
+
+  ```
+  $ bin/rails task_progress:vendor                    # or `task_progress vendor` outside Rails
+  $ npm install ./vendor/javascript/task_progress
+  ```
+
+  Then `import { TaskTreeView } from "task_progress/react"` and `import "task_progress/task_tree.css"`, with TypeScript declarations included. Commit the copy, and vendor again after updating the gem - Rails warns at boot while the copy is from another version.
+- **Anything else on Rack:** serve `TaskProgress.js_path` under any prefix. The modules import each other by relative path, and need no build step.
+
+React and Stimulus are not bundled: the components import `react`, `react-dom/client` and `@hotwired/stimulus` by name, from your app.
+
 ## Handing work off
 
 Create the tree here, and let a job write to it there - through Redis:
