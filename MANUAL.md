@@ -799,6 +799,8 @@ Reading is for writers we do not trust - a subprocess, a stream relayed from els
 
 `Wire.dump(batch)`, `Wire.parse(line)`, `Wire.to_h(batch)`, `Wire.from_h(hash)`, `Wire.each_batch(io)`.
 
+[PORTING](PORTING.md) has the format from the other side: how to write a publisher or a reader in another language, with both in Go and in Crystal.
+
 ## Testing
 
 ```ruby

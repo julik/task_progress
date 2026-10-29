@@ -24,6 +24,7 @@ is nothing before it to be compatible with.
 - Stream stores take a `namespace:`; an unset one raises in production rather than keep trees in one process.
 - In Rails, the browser client is served at `/task_progress/js`, and cancel buttons send the page's CSRF token.
 - RECIPES.md: whole setups to start from.
+- PORTING.md: the wire format for other languages, with a small publisher and consumer in Go and in Crystal.
 - Test helpers: `outline`, `RecordingOutput`, `TaskProgress::Assertions`.
 - The wire format carries its version, `v: 1`; readers drop batches in any other.
 - Typed with inline RBS, checked by Steep; the signatures ship with the gem.
