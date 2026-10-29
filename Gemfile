@@ -6,9 +6,9 @@ gemspec
 gem "progressive_io", "~> 2.0"
 
 group :examples do
-  # From git until a release has `expose`, the on_load(:assiette) hook and the fix for ?s=00000000
-  # after an edit, which bin/dev hits all the time. The branch is julik/assiette#12 - main once merged
-  gem "assiette", github: "julik/assiette", branch: "expose-load-hook"
+  # From main until a release has `expose`, the on_load(:assiette) hook and the fix for ?s=00000000
+  # after an edit, which bin/dev hits all the time
+  gem "assiette", github: "julik/assiette"
   gem "puma"
   gem "rackup"
 end
