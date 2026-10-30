@@ -38,6 +38,7 @@ class TaskProgress
   autoload :Transaction, "#{PARTS}/transaction"
   autoload :Branch, "#{PARTS}/branch"
   autoload :Mount, "#{PARTS}/mount"
+  autoload :Pipes, "#{PARTS}/pipes"
   autoload :Squasher, "#{PARTS}/squasher"
   autoload :SummaryOutput, "#{PARTS}/summary_output"
   autoload :NDJSONOutput, "#{PARTS}/ndjson_output"

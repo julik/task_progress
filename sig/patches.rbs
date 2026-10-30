@@ -6,7 +6,3 @@ class Thread
                            | ...
 end
 
-# Process.spawn is Kernel#spawn as a module function - RBS has only the latter
-module Process
-  def self.spawn: (*untyped) -> Integer
-end

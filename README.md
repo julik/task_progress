@@ -136,10 +136,13 @@ TaskProgress::SSE.response(progress.key)                   # a page's stream, an
 
 ```ruby
 engine = root.mount("Engine", weight: 3)
-engine.spawn(RbConfig.ruby, "engine.rb")  # engine.rb uses TaskProgress.cli, and reports up a pipe
+pipes = engine.pipes
+pid = Process.spawn(pipes.env, "ruby", "engine.rb", **pipes.redirects)  # or fork, Open3...
+pipes.follow                       # engine.rb uses TaskProgress.cli, and reports up a pipe
+Process.wait(pid)
 ```
 
-The child's tree lands under the mount, and a cancel goes down to it the same way. Ractors work too, on Ruby 4.0.
+The child's tree lands under the mount, and a cancel goes down to it the same way. Starting the child and waiting for it stay yours. Ractors work too, on Ruby 4.0.
 
 ## Canceling
 

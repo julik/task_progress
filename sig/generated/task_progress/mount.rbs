@@ -28,8 +28,6 @@ class TaskProgress
 
     @control_lock: Thread::Mutex
 
-    @pid_lock: Thread::Mutex
-
     @source: String?
 
     @stale: bool
@@ -37,8 +35,6 @@ class TaskProgress
     @remote_ended: bool
 
     @controlled: bool
-
-    @reaped: bool
 
     @own: bool
 
@@ -82,16 +78,20 @@ class TaskProgress
     # : (IO) -> self
     def read: (IO) -> self
 
-    # Runs a command with TASK_PROGRESS_FD pointing at a pipe, follows it until it exits, and
-    # returns its Process::Status. A child that exits without finishing its root fails the mount.
-    #
-    # A second pipe, TASK_PROGRESS_CONTROL_FD, carries cancel requests the other way, so tasks in
-    # the child can be canceled from here - see #request_cancel; TaskProgress.cli reads it. When
-    # the mount itself is canceled, the child is asked to cancel its root, and is sent TERM if it
-    # is still running `grace` seconds later. Interrupted (Ctrl-C, a timeout), it terminates the
-    # child at once
-    # : (*untyped command, ?grace: Integer | Float, **untyped options) -> Process::Status?
-    def spawn: (*untyped command, ?grace: Integer | Float, **untyped options) -> Process::Status?
+    # Two pipes for a child process to report up and take cancel requests from - see Pipes.
+    # With a block, they are closed once it returns
+    # : () -> Pipes
+    # : [T] () { (Pipes) -> T } -> T
+    def pipes: () -> Pipes
+             | [T] () { (Pipes) -> T } -> T
+
+    # Cancel requests go down `io` from now on - see Pipes
+    # : (IO) -> void
+    def take_control: (IO) -> void
+
+    # Closes `io`, if cancel requests still go down it
+    # : (IO) -> void
+    def release_control: (IO) -> void
 
     # Follows the tree a StreamOutput writes to `stream` at `key` - what TaskProgress.handoff and
     # TaskProgress.adopt write - on a thread of its own, checking every `poll` seconds. Cancel
@@ -120,7 +120,7 @@ class TaskProgress
 
     # Passes a cancel request on to the child, for the task at `path` in its own tree. Returns
     # :forwarded, or :moot when there is no child to ask any more - it has exited, or this mount
-    # was never spawned. Whether the child cancels anything shows up the stream, if it does
+    # never had one. Whether the child cancels anything shows up the stream, if it does
     # : (path, ?String?) -> (:forwarded | :moot)
     def request_cancel: (path, ?String?) -> (:forwarded | :moot)
 
@@ -172,18 +172,6 @@ class TaskProgress
     # The remote's events, moved under the mount - or nil if one would land too deep
     # : (Array[Event], Float) -> Array[Event]?
     def translate: (Array[Event], Float) -> Array[Event]?
-
-    # Asks the child to cancel its root, and sends TERM if it has not exited `grace` seconds on
-    # : (Integer, Integer | Float) -> void
-    def stop: (Integer, Integer | Float) -> void
-
-    # The pid is only ever signaled while it is still ours: reaping and signaling share a lock, so
-    # a signal can never reach another process that was given the pid after ours exited
-    # : (Integer, Symbol) -> void
-    def signal: (Integer, Symbol) -> void
-
-    # : (Integer) -> Process::Status?
-    def reap: (Integer) -> Process::Status?
 
     TIMES: Array[Symbol]
 

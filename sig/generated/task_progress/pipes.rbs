@@ -1,0 +1,57 @@
+# Generated from lib/task_progress/pipes.rb with RBS::Inline
+
+class TaskProgress
+  # Two pipes between a Mount and a child process: one the child writes its batches up, one it
+  # reads cancel requests from. Starting the child is yours, as is waiting for it, signaling it
+  # and making sense of how it exited - this only carries the progress:
+  #
+  #     pipes = engine.pipes
+  #     pid = Process.spawn(pipes.env, "bin/render", **pipes.redirects)
+  #     pipes.follow
+  #     Process.wait(pid)
+  #
+  # The child finds both through `env` - TaskProgress.cli does. They are the descriptors' own
+  # numbers, so the same `env` does for a forked child, which already has them, and for one
+  # started with `exec`, which keeps them through `redirects`. Canceling the mount asks the
+  # child to cancel its root, and that is all it does: a child that will not listen is yours to
+  # stop
+  class Pipes
+    # What a child finds the pipes by: `TASK_PROGRESS_FD`, to write batches to, and
+    # `TASK_PROGRESS_CONTROL_FD`, to read cancel requests from
+    attr_reader env: Hash[String, String]
+
+    # The child's ends by their numbers, for `Process.spawn` to keep them open across `exec`
+    attr_reader redirects: Hash[Integer, IO]
+
+    @mount: Mount
+
+    @reader: IO
+
+    @writer: IO
+
+    @control_reader: IO
+
+    @control: IO
+
+    # Pipes for the mount - see Mount#pipes, which makes them
+    # : (Mount) -> void
+    def initialize: (Mount) -> void
+
+    # Reads what the child sends until it closes its end, which it does by exiting, and closes
+    # the pipes. Call it once the child has started: it first closes this process's copies of
+    # the child's ends, or it would be waiting on itself. A child that went away without
+    # finishing its root fails the mount. Interrupted, it cancels the mount - which asks the
+    # child to stop - and raises on. Returns the mount's task
+    # : () -> TaskProgress
+    def follow: () -> TaskProgress
+
+    # Closes every end still open here - for when the child never started. #follow does it too
+    # : () -> void
+    def close: () -> void
+
+    private
+
+    # : () -> void
+    def close_child_ends: () -> void
+  end
+end

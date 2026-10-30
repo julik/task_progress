@@ -2,7 +2,6 @@
 # rbs_inline: enabled
 
 require "json"
-require "rbconfig"
 
 class TaskProgress
   # Grafts a tree that lives elsewhere under one node of this one. The remote root lands on the
@@ -28,12 +27,10 @@ class TaskProgress
     # @rbs @control: IO?
     # @rbs @last_seq: Integer?
     # @rbs @control_lock: Thread::Mutex
-    # @rbs @pid_lock: Thread::Mutex
     # @rbs @source: String?
     # @rbs @stale: bool
     # @rbs @remote_ended: bool
     # @rbs @controlled: bool
-    # @rbs @reaped: bool
     # @rbs @own: bool
     # @rbs @following: bool
     # @rbs @forward: (^(String) -> void)?
@@ -62,13 +59,11 @@ class TaskProgress
       @generation = 0
       @control = nil
       @control_lock = Mutex.new
-      @pid_lock = Mutex.new
       @source = nil
       @last_seq = nil
       @stale = false
       @remote_ended = false
       @controlled = false
-      @reaped = false
     end
 
     # The mount node, as a task of this tree
@@ -143,46 +138,40 @@ class TaskProgress
       self
     end
 
-    # Runs a command with TASK_PROGRESS_FD pointing at a pipe, follows it until it exits, and
-    # returns its Process::Status. A child that exits without finishing its root fails the mount.
-    #
-    # A second pipe, TASK_PROGRESS_CONTROL_FD, carries cancel requests the other way, so tasks in
-    # the child can be canceled from here - see #request_cancel; TaskProgress.cli reads it. When
-    # the mount itself is canceled, the child is asked to cancel its root, and is sent TERM if it
-    # is still running `grace` seconds later. Interrupted (Ctrl-C, a timeout), it terminates the
-    # child at once
-    #: (*untyped command, ?grace: Integer | Float, **untyped options) -> Process::Status?
-    def spawn(*command, grace: 5, **options)
-      reader, writer = IO.pipe
-      control_reader, @control = IO.pipe
-      env = command.first.is_a?(Hash) ? command.shift : {} #: Hash[String, String]
-      status = nil
-      @reaped = false
-      pid = Process.spawn({**env, "TASK_PROGRESS_FD" => "3", "TASK_PROGRESS_CONTROL_FD" => "4"}, *command,
-        3 => writer, 4 => control_reader, **options)
-      writer.close
-      control_reader.close
+    # Two pipes for a child process to report up and take cancel requests from - see Pipes.
+    # With a block, they are closed once it returns
+    #: () -> Pipes
+    #: [T] () { (Pipes) -> T } -> T
+    def pipes
+      pipes = Pipes.new(self)
+      return pipes unless block_given?
+      begin
+        yield pipes
+      ensure
+        pipes.close
+      end
+    end
+
+    # Cancel requests go down `io` from now on - see Pipes
+    #: (IO) -> void
+    def take_control(io) # :nodoc:
+      @control_lock.synchronize do
+        previous = @control
+        previous.close unless previous.nil? || previous.closed?
+        @control = io
+      end
       @controlled = true
-      task.on_cancel { stop(pid, grace) unless @remote_ended }
-      read(reader)
-      status = reap(pid)
-      fail!("#{File.basename(command.first.to_s)} exited with #{status.exitstatus || status.termsig}") if status && !status.success?
-      fail!("#{File.basename(command.first.to_s)} exited without finishing") unless finished?
-      status
-    rescue Interrupt => e
-      cancel!(TaskProgress.interrupted_by(e))
-      raise
-    rescue Exception => e # rubocop:disable Lint/RescueException
-      fail!(e)
-      raise
-    ensure
-      @controlled = false
-      @control_lock.synchronize { @control&.close unless @control&.closed? }
-      reader&.close
-      writer&.close unless writer&.closed?
-      if pid && status.nil?
-        signal(pid, :TERM)
-        reap(pid)
+      arm_cancel
+    end
+
+    # Closes `io`, if cancel requests still go down it
+    #: (IO) -> void
+    def release_control(io) # :nodoc:
+      @control_lock.synchronize do
+        next unless @control.equal?(io)
+        io.close unless io.closed?
+        @control = nil
+        @controlled = false
       end
     end
 
@@ -239,7 +228,7 @@ class TaskProgress
 
     # Passes a cancel request on to the child, for the task at `path` in its own tree. Returns
     # :forwarded, or :moot when there is no child to ask any more - it has exited, or this mount
-    # was never spawned. Whether the child cancels anything shows up the stream, if it does
+    # never had one. Whether the child cancels anything shows up the stream, if it does
     #: (path, ?String?) -> (:forwarded | :moot)
     def request_cancel(path, reason = nil) # :nodoc:
       # Over a stream, a request names the run it is for, so it cannot reach another one by mistake
@@ -389,43 +378,6 @@ class TaskProgress
         else Event.new(path:, op: event.op, value:)
         end
       end
-    end
-
-    # Asks the child to cancel its root, and sends TERM if it has not exited `grace` seconds on
-    #: (Integer, Integer | Float) -> void
-    def stop(pid, grace)
-      request_cancel([], task.message)
-      Thread.new do
-        sleep(grace)
-        signal(pid, :TERM)
-      end
-    end
-
-    # The pid is only ever signaled while it is still ours: reaping and signaling share a lock, so
-    # a signal can never reach another process that was given the pid after ours exited
-    #: (Integer, Symbol) -> void
-    def signal(pid, name)
-      @pid_lock.synchronize { Process.kill(name, pid) unless @reaped }
-    rescue Errno::ESRCH
-      nil
-    end
-
-    #: (Integer) -> Process::Status?
-    def reap(pid)
-      # Never waiting with the lock held, which would keep `stop` from sending TERM to a child
-      # that will not exit by itself - but reaping only with it, so a signal cannot slip in between
-      loop do
-        status = @pid_lock.synchronize do
-          _, exited = Process.wait2(pid, Process::WNOHANG)
-          @reaped = true if exited
-          exited
-        end
-        return status if status
-        sleep(0.02)
-      end
-    rescue Errno::ECHILD
-      @reaped = true
-      nil
     end
 
     TIMES = %i[opened_at started_at finished_at].freeze #: Array[Symbol]

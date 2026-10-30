@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # The "engine" the demos run in a subprocess. It reports through TaskProgress.cli, so run on its
-# own it draws in the terminal, and spawned by Mount#spawn it writes batches up the pipe instead.
+# own it draws in the terminal, and started with a Mount's pipes it writes batches up them instead.
 #   ruby -Ilib examples/child_worker.rb [--fail] [--speed 2.0]
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 require "task_progress"

@@ -14,7 +14,7 @@ module DemoJob
     download = root.subtask("Download catalogue", total: 12 * 1024 * 1024, unit: "bytes", cancelable: true)
     parse = root.subtask("Parse records", weight: 2)
     wait = root.subtask("Wait for upstream", indeterminate: true, cancelable: true)
-    # Canceling the mount terminates the subprocess; what runs inside it cannot be called off from here
+    # Canceling the mount asks the subprocess to stop; what runs inside it cannot be called off from here
     engine = root.mount("Engine (subprocess)", weight: 3, cancelable: true)
     publish = root.subtask("Publish")
 
@@ -29,7 +29,12 @@ module DemoJob
 
     wait.run { ["Connecting", "Negotiating", "Waiting in queue"].each { wait.note(it) && nap.call(0.5) } }
 
-    engine.spawn(RbConfig.ruby, CHILD, "--speed", speed.to_s, *("--fail" if fail), err: File::NULL)
+    engine.pipes do |pipes|
+      pid = Process.spawn(pipes.env, RbConfig.ruby, CHILD, "--speed", speed.to_s, *("--fail" if fail), err: File::NULL, **pipes.redirects)
+      pipes.follow
+    ensure
+      Process.wait(pid) if pid
+    end
     raise "the engine failed: #{engine.task.error&.dig(:message)}" if engine.task.failed?
 
     publish.run { publish.update(50, message: "Almost there") && nap.call(0.3) }

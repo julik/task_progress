@@ -163,7 +163,7 @@ root = TaskProgress.cli("Import")          # or not: then finished at exit
 
 `cli` picks its output from where it runs:
 
-- **Spawned by `Mount#spawn`** (`TASK_PROGRESS_FD` is set): batches up the pipe, and cancel requests read from the control pipe.
+- **Started with a Mount's pipes** (`TASK_PROGRESS_FD` is set): batches up the pipe, and cancel requests read from the control pipe.
 - **On a terminal**: `TerminalOutput`.
 - **Piped, or on a terminal with `CI` set**: `ExecutionLogOutput`.
 - **`quiet: true`**: nothing.
@@ -227,7 +227,11 @@ Any task can be streamed as a tree of its own: the task becomes the root at `[]`
 
 ```ruby
 engine = root.mount("Engine", weight: 3, cancelable: true)
-status = engine.spawn(RbConfig.ruby, "engine.rb", grace: 5)  # returns its Process::Status
+engine.pipes do |pipes|
+  pid = Process.spawn(pipes.env, RbConfig.ruby, "engine.rb", **pipes.redirects)
+  pipes.follow
+  Process.wait(pid)
+end
 ```
 
 A **mount** is a node whose subtree is fed from elsewhere. The remote's root lands on the mount node and its `["x3k0"]` on `[*mount, "x3k0"]` - mounting is prefixing, and a relay through several processes prefixes once per hop. The mount node is sealed: only its Mount writes under it, and the remote cannot rename or reweigh it. Each remote batch is committed here as one batch, or dropped whole if it does not apply. The remote's times are moved onto this clock by the gap between its commit time and ours.
@@ -241,13 +245,27 @@ mount.stale?
 
 A batch already applied is a duplicate - ordinary after a reconnect. One that does not follow the last is a gap: the subtree is marked stale, and stays so until a batch with `prev` 0 replaces it whole. Anything the remote sends is distrusted (see [The wire format](#the-wire-format)).
 
-### Spawn
+### Pipes
 
-`spawn` starts a command with `TASK_PROGRESS_FD=3` pointing at a pipe it follows, and `TASK_PROGRESS_CONTROL_FD=4` pointing at one it writes cancel requests to. The child uses `TaskProgress.cli`, which finds both; neither pipe is handed down to processes the child starts. Its stdout and stderr stay its own.
+TaskProgress does not start processes. `mount.pipes` gives you two pipes and what a child needs to find them; how it is started, waited for, signaled and judged by its exit status is yours.
 
-- A child that exits without finishing its root fails the mount. One that exits with an error fails it with that.
-- Canceling the mount asks the child to cancel its root, and sends TERM if it is still running `grace` seconds later. The pid is only ever signaled while it is still ours.
-- Interrupted (Ctrl-C, a timeout), `spawn` terminates the child at once and cancels or fails the mount.
+| | |
+|---|---|
+| `env` | `TASK_PROGRESS_FD`, the pipe the child writes batches to, and `TASK_PROGRESS_CONTROL_FD`, the one it reads cancel requests from - by the descriptors' own numbers. |
+| `redirects` | Those descriptors, for `Process.spawn` to keep open across `exec`. |
+| `follow` | Closes this process's copies of the child's ends, reads until the child closes its own, and closes the pipes. Returns the mount's task. |
+| `close` | Closes them all, for a child that never started. With a block, `mount.pipes { }` closes them when it returns. |
+
+```ruby
+pid = Process.spawn(pipes.env, "bin/render", **pipes.redirects)   # exec'd: keeps them by redirects
+pid = fork { ENV.update(pipes.env); TaskProgress.cli("Render") { ... }; exit! }   # forked: has them already
+```
+
+The child uses `TaskProgress.cli`, which finds both pipes and hands neither down to processes it starts in turn. Its stdout and stderr stay its own. Anything else that writes the format can be the child - see [PORTING](PORTING.md).
+
+- A child that closes its pipe - exits, usually - without finishing its root fails the mount. One that failed sends its error up first.
+- Canceling the mount asks the child to cancel its root, over the control pipe, and that is all. A child that will not listen is yours to stop.
+- Interrupted (Ctrl-C, a timeout), `follow` cancels the mount, which asks the child to stop, and raises on.
 - The parent may end the mount itself, when the remote went away: `mount.task.done!`, `fail!`, `cancel!`. Whatever the remote sends after that changes nothing.
 
 ### Ractors

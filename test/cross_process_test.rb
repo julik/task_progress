@@ -3,12 +3,21 @@ require "rbconfig"
 require "tmpdir"
 require "timeout"
 
-# Real children: TaskProgress.cli on their end, Mount#spawn on ours
+# Real children: TaskProgress.cli on their end, Mount#pipes on ours
 class CrossProcessTest < Minitest::Test
   LIB = File.expand_path("../lib", __dir__)
 
+  # Starts the child, follows it and returns how it exited - what a caller of Pipes does
   def spawn_child(mount, script)
-    mount.spawn(RbConfig.ruby, "-I", LIB, "-rtask_progress", "-e", script, err: File::NULL)
+    mount.pipes do |pipes|
+      pid = Process.spawn(pipes.env, RbConfig.ruby, "-I", LIB, "-rtask_progress", "-e", script, err: File::NULL, **pipes.redirects)
+      begin
+        pipes.follow
+      ensure
+        _, status = Process.wait2(pid)
+      end
+      status
+    end
   end
 
   def test_a_child_tree_is_mirrored_and_finishes_the_mount
@@ -49,16 +58,17 @@ class CrossProcessTest < Minitest::Test
   def test_a_child_killed_mid_line_keeps_what_arrived_and_fails_the_mount
     mount = TaskProgress.new("local").mount("Engine")
     status = spawn_child(mount, <<~RUBY)
+      fd = Integer(ENV["TASK_PROGRESS_FD"])
       root = TaskProgress.cli("child")
       root.subtask("Before").done!
-      IO.new(3).tap { it.sync = true }.write('{"log":"x","prev":3,"seq":4,"ops":[[[0],"no')
+      IO.new(fd).tap { it.sync = true }.write('{"log":"x","prev":3,"seq":4,"ops":[[[0],"no')
       Process.kill(:KILL, Process.pid)
     RUBY
 
     assert status.signaled?
     assert_equal ["Before"], mount.task.subtasks.map(&:name)
     assert_equal :failed, mount.task.status
-    assert_match(/exited with 9/, mount.task.error[:message])
+    assert_match(/without finishing/, mount.task.error[:message])
   end
 
   def test_a_child_that_dies_without_finishing_fails_the_mount
@@ -74,7 +84,7 @@ class CrossProcessTest < Minitest::Test
     assert_equal [:done, :done], [mount.task.status, mount.task.subtasks.first.status]
   end
 
-  def test_canceling_a_task_above_a_mount_cancels_it_and_terminates_the_child
+  def test_canceling_a_task_above_a_mount_cancels_it_and_the_child_stops
     root = TaskProgress.new("local")
     mount = root.mount("Engine")
     worker = Thread.new do
@@ -91,7 +101,7 @@ class CrossProcessTest < Minitest::Test
     assert_equal [:canceled, :canceled, :canceled], [root, mount.task, mount.task.subtasks.first].map(&:status)
   end
 
-  def test_canceling_the_mounts_own_task_terminates_the_child
+  def test_canceling_the_mounts_own_task_stops_the_child
     root = TaskProgress.new("local")
     mount = root.mount("Engine", cancelable: true)
     worker = Thread.new do
@@ -103,20 +113,6 @@ class CrossProcessTest < Minitest::Test
     assert_equal [:canceled, :canceled], [mount.task.status, mount.task.subtasks.first.status]
     assert_raises(ArgumentError, "under it is still the Mount's") { mount.task.subtasks.first.note("x") }
     refute mount.task.node.stale, "what the child sent on its way out is not taken for a gap"
-  end
-
-  def test_a_child_too_stuck_to_listen_is_terminated_after_the_grace_period
-    root = TaskProgress.new("local")
-    mount = root.mount("Engine")
-    worker = Thread.new do
-      mount.spawn(RbConfig.ruby, "-I", LIB, "-rtask_progress", "-e", 'TaskProgress.cli("child") { |r| r.note("in"); sleep }', err: File::NULL, grace: 0.3)
-    end
-    sleep 0.05 until mount.task.status == :active
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    root.cancel!
-    worker.value
-    assert_in_delta 0.3, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, 0.5, "stopped by the TERM, after the grace period"
-    assert_equal :canceled, mount.task.status
   end
 
   def test_a_cancel_request_reaches_a_task_inside_the_child
@@ -149,7 +145,11 @@ class CrossProcessTest < Minitest::Test
     RUBY
     child = <<~RUBY
       TaskProgress.cli("child") do |r|
-        r.mount("Inner").spawn(RbConfig.ruby, "-I", #{LIB.inspect}, "-rtask_progress", "-e", #{grandchild.inspect}, err: File::NULL)
+        r.mount("Inner").pipes do |pipes|
+          pid = Process.spawn(pipes.env, RbConfig.ruby, "-I", #{LIB.inspect}, "-rtask_progress", "-e", #{grandchild.inspect}, err: File::NULL, **pipes.redirects)
+          pipes.follow
+          Process.wait(pid)
+        end
       end
     RUBY
     root = TaskProgress.new("local")
@@ -163,14 +163,14 @@ class CrossProcessTest < Minitest::Test
     assert_equal [["Deep", :canceled, "Two hops down"], ["After", :done, "carried on"]], inner.subtasks.map { [it.name, it.status, it.message] }
   end
 
-  def test_a_child_that_finishes_by_itself_is_never_signaled
+  def test_a_child_that_cancels_its_own_root_cancels_the_mount
     mount = TaskProgress.new("local").mount("Engine")
     status = spawn_child(mount, 'TaskProgress.cli("child") { |r| r.cancel!("Changed my mind") }')
     assert status.success?
     assert_equal :canceled, mount.task.status
   end
 
-  def test_interrupting_the_parent_terminates_the_child
+  def test_interrupting_the_parent_asks_the_child_to_stop
     mount = TaskProgress.new("local").mount("Engine")
     pid_file = File.join(Dir.tmpdir, "task_progress_child_#{Process.pid}.pid")
     parent = Thread.new do
@@ -185,18 +185,35 @@ class CrossProcessTest < Minitest::Test
     child = Integer(File.read(pid_file))
     sleep 0.3
     parent.raise(Interrupt)
-    assert_equal :interrupted, parent.value
-    assert_raises(Errno::ESRCH) { Process.kill(0, child) }
+    Timeout.timeout(5) { assert_equal :interrupted, parent.value }
+    assert_raises(Errno::ESRCH, "asked over the control pipe, it canceled its root and exited by itself") { Process.kill(0, child) }
     assert_equal :canceled, mount.task.status, "an interrupt calls the work off"
   ensure
     File.delete(pid_file) if pid_file && File.exist?(pid_file)
   end
 
+  def test_a_forked_child_finds_the_pipes_it_already_has
+    mount = TaskProgress.new("local").mount("Engine")
+    status = mount.pipes do |pipes|
+      pid = fork do
+        ENV.update(pipes.env)
+        TaskProgress.cli("child") { |root| root.subtask("Forked", total: 2) { |t| 2.times { t.tick } } }
+        exit!(0) # the parent's at_exit - minitest's among them - is not ours to run
+      end
+      pipes.follow
+      Process.wait2(pid).last
+    end
+    assert status.success?
+    assert_equal :done, mount.task.status
+    assert_equal [["Forked", 2]], mount.task.subtasks.map { [it.name, it.count] }
+  end
+
   def test_the_child_leaves_no_fd_for_its_own_children
     mount = TaskProgress.new("local").mount("Engine")
     spawn_child(mount, <<~RUBY)
+      given = [ENV["TASK_PROGRESS_FD"], ENV["TASK_PROGRESS_CONTROL_FD"]].map { Integer(it) }
       TaskProgress.cli("child") do |root|
-        fds = [3, 4].map { IO.for_fd(it, autoclose: false).close_on_exec? }
+        fds = given.map { IO.for_fd(it, autoclose: false).close_on_exec? }
         root.note([ENV.fetch("TASK_PROGRESS_FD", "gone"), ENV.fetch("TASK_PROGRESS_CONTROL_FD", "gone"), *fds].join(" "))
       end
     RUBY

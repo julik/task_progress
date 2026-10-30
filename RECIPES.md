@@ -256,7 +256,11 @@ TaskProgress.cli("Transcode #{files.length} files", cancelable: true) do |root|
   workers = [Etc.nprocessors / 2, files.length].min.clamp(1, nil).times.map do
     Thread.new do
       while (file, mount = queue.pop)
-        mount.spawn(RbConfig.ruby, File.expand_path("transcode.rb", __dir__), file)
+        mount.pipes do |pipes|
+          pid = Process.spawn(pipes.env, RbConfig.ruby, File.expand_path("transcode.rb", __dir__), file, **pipes.redirects)
+          pipes.follow
+          Process.wait(pid)
+        end
       end
     end
   end
@@ -268,7 +272,7 @@ end
 $ ruby transcode_all.rb *.mov
 ```
 
-Every video shows from the start, waiting its turn. `TaskProgress.cli` in the worker sees it was started by `spawn` and writes its batches up the pipe instead of drawing; `spawn` returns once the worker exits. On a terminal the tree redraws in place. Piped, or on CI, it writes an execution log instead:
+Every video shows from the start, waiting its turn. `TaskProgress.cli` in the worker finds the pipes in its environment and writes its batches up them instead of drawing; `follow` returns once the worker exits. Ctrl-C cancels the tree, and the cancel goes down to every worker, which stops and exits. On a terminal the tree redraws in place. Piped, or on CI, it writes an execution log instead:
 
 ```
 [ 10%   0.6s] Transcode 2 files › a.mov › 1080p 4/20

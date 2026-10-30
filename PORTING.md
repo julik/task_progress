@@ -2,7 +2,7 @@
 
 How to publish progress to TaskProgress, or read it, from another language. Nothing below needs Ruby on the other side. The format is newline-delimited JSON, and a writer that follows the few rules here can be mounted under a Ruby tree, drawn by the browser client, or relayed over SSE like one written in Ruby. A reader that folds the same way draws the same tree.
 
-At the end are a small publisher and a small consumer in Go and in Crystal, each a single file with only the standard library. All four have been run against this gem: the publishers spawned with `Mount#spawn` (to completion, and canceled from the parent halfway), and the consumers following `TaskProgress::SSE` from the start and joining late.
+At the end are a small publisher and a small consumer in Go and in Crystal, each a single file with only the standard library. All four have been run against this gem: the publishers started on a mount's pipes (to completion, and canceled from the parent halfway), and the consumers following `TaskProgress::SSE` from the start and joining late.
 
 ## The model
 
@@ -99,12 +99,12 @@ A reader taking batches from somewhere it does not trust should check them first
 
 ### A pipe
 
-`Mount#spawn` runs a program with two pipes:
+`Mount#pipes` gives a program two pipes, by their numbers in the environment:
 
-- `TASK_PROGRESS_FD=3` - write batches to it, one line each. Your root lands on the mount's node in the parent's tree, so your `[]` is the mount and your `["x3k0"]` is a child of it.
-- `TASK_PROGRESS_CONTROL_FD=4` - cancel requests come down it, one JSON line each: `{"cancel": ["x3k0"], "reason": "Not needed"}`. `[]` is your root - that one arrives when the parent cancels the mount, and the program gets a TERM if it has not exited some seconds later. Any other path is a task you opened with `cancelable: true`.
+- `TASK_PROGRESS_FD` - write batches to it, one line each. Your root lands on the mount's node in the parent's tree, so your `[]` is the mount and your `["x3k0"]` is a child of it.
+- `TASK_PROGRESS_CONTROL_FD` - cancel requests come down it, one JSON line each: `{"cancel": ["x3k0"], "reason": "Not needed"}`. `[]` is your root - that one arrives when the parent cancels the mount. Whether the program is then signaled is up to whoever started it. Any other path is a task you opened with `cancelable: true`.
 
-Handling a cancel is sending a `cancel` for the task, and everything still open under it, and stopping the work. A program that exits without ending its root fails the mount, and one that exits non-zero fails it with that. Outside `spawn`, write to stdout instead, and the same lines can be read by a Ruby `mount.read(io)` from any IO - a pipe, a socket, a file.
+Handling a cancel is sending a `cancel` for the task, and everything still open under it, and stopping the work. A program that exits without ending its root fails the mount, and one that exits non-zero fails it with that. Started some other way, write to stdout instead, and the same lines can be read by a Ruby `mount.read(io)` from any IO - a pipe, a socket, a file.
 
 ### Server-Sent Events
 
@@ -129,7 +129,7 @@ First a squash, `prev` 0, then every batch as it commits, each a `batch` event w
 
 ## The examples
 
-A publisher that resizes photos - five counted downloads, then an indeterminate resize - and a consumer that redraws the tree on a terminal as batches come in. The publisher writes to `TASK_PROGRESS_FD` when it is spawned by a mount, and to stdout otherwise; it honours a cancel of its root. The consumer follows an SSE URL, or reads NDJSON from stdin when given `-`:
+A publisher that resizes photos - five counted downloads, then an indeterminate resize - and a consumer that redraws the tree on a terminal as batches come in. The publisher writes to `TASK_PROGRESS_FD` when it is started on a mount's pipes, and to stdout otherwise; it honours a cancel of its root. The consumer follows an SSE URL, or reads NDJSON from stdin when given `-`:
 
 ```
 $ ./publisher | ./consumer -
@@ -138,7 +138,11 @@ $ ./consumer http://localhost:9292/jobs/k7p2qd9z4m/events
 
 ```ruby
 root = TaskProgress.new("Photos")
-root.mount("Resizing", cancelable: true).spawn("./publisher")
+root.mount("Resizing", cancelable: true).pipes do |pipes|
+  pid = Process.spawn(pipes.env, "./publisher", **pipes.redirects)
+  pipes.follow
+  Process.wait(pid)
+end
 ```
 
 They keep to what each language has built in, and leave out what a real one would want: checking what a remote sends, `unit`, `stale`, errors beyond their message, the elapsed times, and canceling tasks below the root.
@@ -211,7 +215,7 @@ func randomID(n int) string {
 	return string(id)
 }
 
-// The pipe a parent TaskProgress hands us with Mount#spawn, or stdout
+// The pipe a parent TaskProgress hands us with Mount#pipes, or stdout
 func output() *os.File {
 	if fd, err := strconv.Atoi(os.Getenv("TASK_PROGRESS_FD")); err == nil {
 		return os.NewFile(uintptr(fd), "progress")
@@ -628,7 +632,7 @@ class Publisher
   end
 end
 
-# The pipe a parent TaskProgress hands us with Mount#spawn, or stdout
+# The pipe a parent TaskProgress hands us with Mount#pipes, or stdout
 output = if fd = ENV["TASK_PROGRESS_FD"]?
            IO::FileDescriptor.new(fd.to_i)
          else
