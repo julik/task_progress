@@ -16,11 +16,18 @@ class TaskProgress
   # and replaces the subtree whole, even one that had finished, while what the old writer still
   # sends is ignored
   class Mount
+    # How many tasks a remote may open under a mount unless told otherwise - plenty for a big
+    # tree, and a bound on what a child that went rogue can make this process hold
+    MAX_TASKS: Integer
+
     # The log the mount node lives in
     attr_reader log: Log
 
     # The mount node
     attr_reader path: path
+
+    # How many tasks the remote may have under the mount at once, or nil for no limit
+    attr_reader max_tasks: Integer?
 
     @control: IO?
 
@@ -54,11 +61,14 @@ class TaskProgress
 
     @generation: Integer
 
+    @tasks: Integer
+
     # For the node at `path` - see TaskProgress#mount, which opens one. Unless `own`, the
     # remote's root names and weighs the mount node too - for a tree that is nothing but a mount,
-    # as TaskProgress.follow makes
-    # : (Log, path, ?own: bool) -> void
-    def initialize: (Log, path, ?own: bool) -> void
+    # as TaskProgress.follow makes. A batch that would take the remote past `max_tasks` fails the
+    # mount instead, and the remote is asked to cancel
+    # : (Log, path, ?own: bool, ?max_tasks: Integer?) -> void
+    def initialize: (Log, path, ?own: bool, ?max_tasks: Integer?) -> void
 
     # The mount node, as a task of this tree
     # : () -> TaskProgress
@@ -161,6 +171,10 @@ class TaskProgress
     # Ending the mount ends what the remote left open under it too, as Task#done! and #fail! do
     # : (Symbol) { (Transaction) -> void } -> self
     def finish: (Symbol) { (Transaction) -> void } -> self
+
+    # How many tasks the event adds under the mount - or takes away, for a prune
+    # : (State, Event) -> Integer
+    def added: (State, Event) -> Integer
 
     # : (Batch | Hash[untyped, untyped] | String) -> Batch?
     def coerce: (Batch | Hash[untyped, untyped] | String) -> Batch?

@@ -19,10 +19,16 @@ class TaskProgress
   # and replaces the subtree whole, even one that had finished, while what the old writer still
   # sends is ignored
   class Mount
+    # How many tasks a remote may open under a mount unless told otherwise - plenty for a big
+    # tree, and a bound on what a child that went rogue can make this process hold
+    MAX_TASKS = 32_768 #: Integer
+
     # The log the mount node lives in
     attr_reader :log #: Log
     # The mount node
     attr_reader :path #: path
+    # How many tasks the remote may have under the mount at once, or nil for no limit
+    attr_reader :max_tasks #: Integer?
 
     # @rbs @control: IO?
     # @rbs @last_seq: Integer?
@@ -40,15 +46,19 @@ class TaskProgress
     # @rbs @silent: bool
     # @rbs @gave_up: bool
     # @rbs @generation: Integer
+    # @rbs @tasks: Integer
 
     # For the node at `path` - see TaskProgress#mount, which opens one. Unless `own`, the
     # remote's root names and weighs the mount node too - for a tree that is nothing but a mount,
-    # as TaskProgress.follow makes
-    #: (Log, path, ?own: bool) -> void
-    def initialize(log, path, own: true)
+    # as TaskProgress.follow makes. A batch that would take the remote past `max_tasks` fails the
+    # mount instead, and the remote is asked to cancel
+    #: (Log, path, ?own: bool, ?max_tasks: Integer?) -> void
+    def initialize(log, path, own: true, max_tasks: MAX_TASKS)
       @log = log
       @path = path
       @own = own
+      @max_tasks = max_tasks
+      @tasks = 0
       @following = false
       @forward = nil
       @reader = nil
@@ -87,6 +97,7 @@ class TaskProgress
       # moved onto ours by the gap between the two; a stream hands on what may have been written
       # long ago, by a machine whose clock is taken to agree with ours
       at = (@following && batch.at.positive?) ? batch.at : nil
+      tasks = @tasks
       outcome = @log.transaction(at:) do |tx|
         node = tx.state[@path] or next :rejected
         source = @source
@@ -112,13 +123,20 @@ class TaskProgress
         events = translate(batch.events, offset) or next :rejected
         events.unshift(Event.new(path: @path, op: :prune)) if batch.reset?
         events.unshift(Event.new(path: @path, op: :put, value: fresh(tx.state))) if new_run || starting_over
-        events.each { tx << it }
+        limit = @max_tasks
+        events.each do |event|
+          tasks += added(tx.state, event)
+          # Raised to roll back what the batch did so far
+          raise TooManyTasks, "Sent more than #{limit} tasks" if limit && tasks > limit
+          tx << event
+        end
         tx << Event.new(path: @path, op: :meta, value: {stale: false}) if @stale
         # Known before the batch is delivered, so an output that sees the mount end can tell who ended it
         @remote_ended = false if starting_over
         @remote_ended ||= batch.events.any? { it.path.empty? && (ENDINGS.include?(it.op) || (it.op == :put && FINISHED.include?(it.value[:status]))) }
         @source = batch.log
         @last_seq = batch.seq
+        @tasks = tasks
         @stale = false
         @silent = false
         @gave_up = false
@@ -127,6 +145,10 @@ class TaskProgress
       # The run before may have ended, and its cancel went with it
       arm_cancel if outcome == :applied && starting_over
       outcome
+    rescue TooManyTasks => e
+      request_cancel([], e.message)
+      fail!(e)
+      :rejected
     rescue ArgumentError
       :rejected
     end
@@ -340,6 +362,16 @@ class TaskProgress
         yield tx
       end
       self
+    end
+
+    # How many tasks the event adds under the mount - or takes away, for a prune
+    #: (State, Event) -> Integer
+    def added(state, event)
+      case event.op
+      when :open, :put then state.key?(event.path) ? 0 : 1
+      when :prune then state.key?(event.path) ? 1 - state.each(event.path).count : 0
+      else 0
+      end
     end
 
     #: (Batch | Hash[untyped, untyped] | String) -> Batch?

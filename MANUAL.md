@@ -81,7 +81,9 @@ With a block, `subtask` runs the block as the task's work and returns its value 
 
 `fail!` takes an exception, a message, or nothing. An exception keeps its class, message, backtrace and up to three causes. `extra` goes along with the error: booleans and integers only, a reader drops the rest.
 
-Anything that starts work - a percent, a count, a note, finishing - starts the task and every task above it. A pending task only becomes active when something happens to it.
+Names and notes go through `TaskProgress.utf8`, which makes any string valid UTF-8 - a file name read raw out of a ZIP, say. It is there for the same text on its way anywhere else, too: an error's message, a child's stderr. `TaskProgress.human_bytes(n)` says "2.9 MB", as the renderers do for a task counting bytes - for a note like "Extracting cover.jpg (142 KB)".
+
+Anything that starts work - a percent, a count, a note, finishing, or `run` beginning its block - starts the task and every task above it. A pending task only becomes active when something happens to it.
 
 ### Reading them
 
@@ -245,6 +247,8 @@ mount.stale?
 
 A batch already applied is a duplicate - ordinary after a reconnect. One that does not follow the last is a gap: the subtree is marked stale, and stays so until a batch with `prev` 0 replaces it whole. Anything the remote sends is distrusted (see [The wire format](#the-wire-format)).
 
+A remote may have up to `max_tasks` tasks under the mount at once - 32,768 (`Mount::MAX_TASKS`) unless `root.mount(name, max_tasks:)` says otherwise, and no limit with `nil`. The batch that would take it past is dropped whole, the mount fails with a `TaskProgress::TooManyTasks`, and the remote is asked to cancel. A child parsing what it was handed may be taken over by it, and this bounds what it can make the parent hold. `TaskProgress.follow` and `fetch` take `max_tasks:` as well.
+
 ### Pipes
 
 TaskProgress does not start processes. `mount.pipes` gives you two pipes and what a child needs to find them; how it is started, waited for, signaled and judged by its exit status is yours.
@@ -267,6 +271,7 @@ The child uses `TaskProgress.cli`, which finds both pipes and hands neither down
 - Canceling the mount asks the child to cancel its root, over the control pipe, and that is all. A child that will not listen is yours to stop.
 - Interrupted (Ctrl-C, a timeout), `follow` cancels the mount, which asks the child to stop, and raises on.
 - The parent may end the mount itself, when the remote went away: `mount.task.done!`, `fail!`, `cancel!`. Whatever the remote sends after that changes nothing.
+- The pipes keep their own descriptor numbers in the child, which may be any. Hand anything else down the same way, at its own number - `"--secret-fd", secret.fileno.to_s` with `secret.fileno => secret` - rather than at a fixed one like 3 or 4, which a pipe may already be.
 
 ### Ractors
 

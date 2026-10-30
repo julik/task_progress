@@ -192,17 +192,19 @@ class TaskProgress
   # cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and fails
   # after `give_up_after` seconds of that, see Mount#follow_stream. With a block, it follows for
   # as long as the block runs; without one, `log.close` stops it. SSE and Poll take the key
-  # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError
-  # : (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
-  # : [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
-  def self.follow: (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
-                 | [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
+  # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError.
+  # A tree that grows past `max_tasks` fails, see Mount
+  # : (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float, ?max_tasks: Integer?) -> TaskProgress
+  # : [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float, ?max_tasks: Integer?) { (TaskProgress) -> T } -> T
+  def self.follow: (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float, ?max_tasks: Integer?) -> TaskProgress
+                 | [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float, ?max_tasks: Integer?) { (TaskProgress) -> T } -> T
 
   # The tree in `stream_store` at `key` as it is now, read once - for a page, or one poll, that needs
   # no more than that. See `follow` for one kept up to date. A key nothing was handed off at -
-  # or whose tree has expired - is a KeyError, as with Hash#fetch
-  # : (String, ?stream_store: untyped) -> TaskProgress
-  def self.fetch: (String, ?stream_store: untyped) -> TaskProgress
+  # or whose tree has expired - is a KeyError, as with Hash#fetch. One past `max_tasks` reads as
+  # failed, see Mount
+  # : (String, ?stream_store: untyped, ?max_tasks: Integer?) -> TaskProgress
+  def self.fetch: (String, ?stream_store: untyped, ?max_tasks: Integer?) -> TaskProgress
 
   # Runs the block as the work of every root among `arguments` that a worker took up with `adopt`
   # - done when it returns, failed when it raises - and closes them after. What JobSerializer
@@ -215,8 +217,8 @@ class TaskProgress
   def self.within: [T] (Array[TaskProgress]) { () -> T } -> T?
 
   # A root that is a mount and nothing else, named after `key` until the stream says otherwise
-  # : (String, untyped) -> [TaskProgress, Mount]
-  def self.mirror: (String, untyped) -> [ TaskProgress, Mount ]
+  # : (String, untyped, Integer?) -> [TaskProgress, Mount]
+  def self.mirror: (String, untyped, Integer?) -> [ TaskProgress, Mount ]
 
   # A size that is cheap to know, or nil - never `count`, which would run a lazy enumerator
   # : (untyped) -> Integer?
@@ -491,9 +493,10 @@ class TaskProgress
   def transaction: [T] () { (TaskProgress) -> T } -> T
 
   # A child whose subtree is fed from elsewhere - a subprocess, a Ractor, a stream. Only the
-  # Mount writes under it, see Mount
-  # : (String, ?weight: (Integer | Float)?, ?cancelable: bool) -> Mount
-  def mount: (String, ?weight: (Integer | Float)?, ?cancelable: bool) -> Mount
+  # Mount writes under it, see Mount. The remote may open up to `max_tasks` under it, or as many
+  # as it likes with nil; past that, the mount fails with a TooManyTasks
+  # : (String, ?weight: (Integer | Float)?, ?cancelable: bool, ?max_tasks: Integer?) -> Mount
+  def mount: (String, ?weight: (Integer | Float)?, ?cancelable: bool, ?max_tasks: Integer?) -> Mount
 
   # Wraps an IO so that reading it advances this task by the bytes read, see TrackedIO. The total
   # is the IO's size unless given; with neither, the task counts bytes with no measure. With a
@@ -523,19 +526,28 @@ class TaskProgress
   # : (Integer | Float) -> String
   def self.duration: (Integer | Float) -> String
 
-  # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
+  # A byte count for people to read: "142 KB", "2.9 MB", "640 bytes" - a whole number drops its
+  # decimal. What the renderers show for a task counting `unit: "bytes"`, and handy for a note
+  # naming a file's size
   # : (Integer | Float) -> String
   def self.human_bytes: (Integer | Float) -> String
 
-  # Every message reaches the tree as valid UTF-8. Messages often name files, and a raw
-  # ZIP read hands those back tagged ASCII-8BIT, so a "Reading Alice’s.xhtml" would
-  # otherwise blow up whatever an output writes to (a database column, a UTF-8 log line)
+  # A string as valid UTF-8, with whatever is not replaced by U+FFFD - nil stays nil. Every name
+  # and message reaches the tree through it. They often name files, and a raw ZIP read hands
+  # those back tagged ASCII-8BIT, so a "Reading Alice’s.xhtml" would otherwise blow up whatever
+  # an output writes to (a database column, a UTF-8 log line). Handy for the same text on its
+  # way anywhere else: an error's message, a child's stderr
   # : (nil) -> nil
   # : (untyped) -> String
   def self.utf8: (nil) -> nil
                | (untyped) -> String
 
   private
+
+  # Starts the task's clock as its work begins, rather than at the first thing the work says -
+  # or at its end, for work that says nothing. Adding nothing starts a task like any other change
+  # : () -> void
+  def begin!: () -> void
 
   # : (**untyped) -> self
   def meta: (**untyped) -> self

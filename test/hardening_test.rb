@@ -63,7 +63,7 @@ class HardeningTest < Minitest::Test
 
   def test_iterate_advances_in_its_steps
     adds = []
-    root = TaskProgress.new("Download", outputs: [->(batch, _) { adds.concat(batch.events.select { it.op == :add }.map(&:value)) }])
+    root = TaskProgress.new("Download", outputs: [->(batch, _) { adds.concat(batch.events.select { it.op == :add && it.value.positive? }.map(&:value)) }])
     root.iterate(100.times, "Chunks", total: 100 * 65_536, step: 65_536) { nil }
     assert_equal 100, adds.length, "every chunk is more than a thousandth"
   end

@@ -67,7 +67,10 @@ class TaskProgress
             say(snapshot, ending(snapshot, event))
           when :say then say(snapshot, "#{names(snapshot, event.path)}: #{event.value}")
           when :note then @pending = [event.path, event.value] if event.value
-          when :set, :add then @pending = [event.path, nil] unless @pending&.first == event.path
+          when :set then @pending = [event.path, nil] unless @pending&.first == event.path
+          when :add
+            # An add of nothing is a run beginning, which is no news yet
+            @pending = [event.path, nil] unless @pending&.first == event.path || event.value == 0
           end
         end
         # Older news than the ending. Judged by what came, never the snapshot, which can run ahead

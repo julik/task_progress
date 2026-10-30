@@ -163,6 +163,17 @@ class CrossProcessTest < Minitest::Test
     assert_equal [["Deep", :canceled, "Two hops down"], ["After", :done, "carried on"]], inner.subtasks.map { [it.name, it.status, it.message] }
   end
 
+  def test_a_child_opening_too_many_tasks_is_failed_and_asked_to_stop
+    mount = TaskProgress.new("local").mount("Engine", max_tasks: 50)
+    status = spawn_child(mount, <<~RUBY)
+      TaskProgress.cli("child") { |root| loop { root.subtask("more") } }
+    RUBY
+
+    assert_equal "TaskProgress::TooManyTasks", mount.task.error[:class]
+    assert_equal 50, mount.task.subtasks.length
+    assert status.exited?, "its endless loop ended on the cancel"
+  end
+
   def test_a_child_that_cancels_its_own_root_cancels_the_mount
     mount = TaskProgress.new("local").mount("Engine")
     status = spawn_child(mount, 'TaskProgress.cli("child") { |r| r.cancel!("Changed my mind") }')

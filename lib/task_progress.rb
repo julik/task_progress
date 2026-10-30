@@ -39,6 +39,7 @@ class TaskProgress
   autoload :Branch, "#{PARTS}/branch"
   autoload :Mount, "#{PARTS}/mount"
   autoload :Pipes, "#{PARTS}/pipes"
+  autoload :TooManyTasks, "#{PARTS}/too_many_tasks"
   autoload :Squasher, "#{PARTS}/squasher"
   autoload :SummaryOutput, "#{PARTS}/summary_output"
   autoload :NDJSONOutput, "#{PARTS}/ndjson_output"
@@ -396,11 +397,12 @@ class TaskProgress
   # cancel its tasks go to whoever writes it; it goes stale when the writer goes quiet, and fails
   # after `give_up_after` seconds of that, see Mount#follow_stream. With a block, it follows for
   # as long as the block runs; without one, `log.close` stops it. SSE and Poll take the key
-  # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError
-  #: (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) -> TaskProgress
-  #: [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float) { (TaskProgress) -> T } -> T
-  def self.follow(key, stream_store: self.stream_store, poll: 1, give_up_after: 60)
-    root, mount = mirror(key, stream_store)
+  # itself, and follow for as long as they need to. A key nothing was handed off at is a KeyError.
+  # A tree that grows past `max_tasks` fails, see Mount
+  #: (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float, ?max_tasks: Integer?) -> TaskProgress
+  #: [T] (String, ?stream_store: untyped, ?poll: Integer | Float, ?give_up_after: Integer | Float, ?max_tasks: Integer?) { (TaskProgress) -> T } -> T
+  def self.follow(key, stream_store: self.stream_store, poll: 1, give_up_after: 60, max_tasks: Mount::MAX_TASKS)
+    root, mount = mirror(key, stream_store, max_tasks)
     mount.follow_stream(stream_store, key, poll:, give_up_after:)
     return root unless block_given?
     begin
@@ -412,10 +414,11 @@ class TaskProgress
 
   # The tree in `stream_store` at `key` as it is now, read once - for a page, or one poll, that needs
   # no more than that. See `follow` for one kept up to date. A key nothing was handed off at -
-  # or whose tree has expired - is a KeyError, as with Hash#fetch
-  #: (String, ?stream_store: untyped) -> TaskProgress
-  def self.fetch(key, stream_store: self.stream_store)
-    root, mount = mirror(key, stream_store)
+  # or whose tree has expired - is a KeyError, as with Hash#fetch. One past `max_tasks` reads as
+  # failed, see Mount
+  #: (String, ?stream_store: untyped, ?max_tasks: Integer?) -> TaskProgress
+  def self.fetch(key, stream_store: self.stream_store, max_tasks: Mount::MAX_TASKS)
+    root, mount = mirror(key, stream_store, max_tasks)
     mount.follow_stream(stream_store, key, watch: false)
     root
   end
@@ -443,12 +446,12 @@ class TaskProgress
   private_class_method :within
 
   # A root that is a mount and nothing else, named after `key` until the stream says otherwise
-  #: (String, untyped) -> [TaskProgress, Mount]
-  def self.mirror(key, stream_store)
+  #: (String, untyped, Integer?) -> [TaskProgress, Mount]
+  def self.mirror(key, stream_store, max_tasks)
     StreamReader.new(stream_store, key).snapshot or raise KeyError.new("Nothing was handed off at #{key}, or it has expired", key:)
     log = Log.new(key:)
     root = new(key, log:)
-    mount = Mount.new(log, [], own: false)
+    mount = Mount.new(log, [], own: false, max_tasks:)
     log.transaction do |tx|
       tx.journal.touch([], tx.state[[]])
       tx.state[[]]&.sealed = mount
@@ -676,6 +679,7 @@ class TaskProgress
   def run
     # Called off before it began: there is no work to do
     return nil if canceled?
+    begin!
     result = yield self
     done!
     result
@@ -923,15 +927,16 @@ class TaskProgress
   end
 
   # A child whose subtree is fed from elsewhere - a subprocess, a Ractor, a stream. Only the
-  # Mount writes under it, see Mount
-  #: (String, ?weight: (Integer | Float)?, ?cancelable: bool) -> Mount
-  def mount(name, weight: nil, cancelable: false)
+  # Mount writes under it, see Mount. The remote may open up to `max_tasks` under it, or as many
+  # as it likes with nil; past that, the mount fails with a TooManyTasks
+  #: (String, ?weight: (Integer | Float)?, ?cancelable: bool, ?max_tasks: Integer?) -> Mount
+  def mount(name, weight: nil, cancelable: false, max_tasks: Mount::MAX_TASKS)
     path = @log.transaction do |tx|
       writable!(tx)
       path = tx.new_child(@path)
       tx << Event.new(path:, op: :open, value: TaskProgress.attributes(name:, weight:, cancelable:))
       # The node holds its Mount, so a cancel request for a task under it can be passed on
-      mount = Mount.new(@log, path)
+      mount = Mount.new(@log, path, max_tasks:)
       tx.state[path]&.sealed = mount
       mount
     end
@@ -978,9 +983,11 @@ class TaskProgress
     end
   end
 
-  # "142 KB", "2.9 MB", "640 bytes" - a whole number drops its decimal
+  # A byte count for people to read: "142 KB", "2.9 MB", "640 bytes" - a whole number drops its
+  # decimal. What the renderers show for a task counting `unit: "bytes"`, and handy for a note
+  # naming a file's size
   #: (Integer | Float) -> String
-  def self.human_bytes(n) # :nodoc:
+  def self.human_bytes(n)
     n = n.to_i
     found = SCALE.find { |_, size| n >= size } or return "#{n} bytes"
     unit, size = found
@@ -989,12 +996,14 @@ class TaskProgress
     "#{number} #{unit}"
   end
 
-  # Every message reaches the tree as valid UTF-8. Messages often name files, and a raw
-  # ZIP read hands those back tagged ASCII-8BIT, so a "Reading Alice’s.xhtml" would
-  # otherwise blow up whatever an output writes to (a database column, a UTF-8 log line)
+  # A string as valid UTF-8, with whatever is not replaced by U+FFFD - nil stays nil. Every name
+  # and message reaches the tree through it. They often name files, and a raw ZIP read hands
+  # those back tagged ASCII-8BIT, so a "Reading Alice’s.xhtml" would otherwise blow up whatever
+  # an output writes to (a database column, a UTF-8 log line). Handy for the same text on its
+  # way anywhere else: an error's message, a child's stderr
   #: (nil) -> nil
   #: (untyped) -> String
-  def self.utf8(message) # :nodoc:
+  def self.utf8(message)
     return if message.nil?
     message = message.to_s
     return message if message.encoding == Encoding::UTF_8 && message.valid_encoding?
@@ -1002,6 +1011,13 @@ class TaskProgress
   end
 
   private
+
+  # Starts the task's clock as its work begins, rather than at the first thing the work says -
+  # or at its end, for work that says nothing. Adding nothing starts a task like any other change
+  #: () -> void
+  def begin!
+    @log.transaction { |tx| writable!(tx) && tx.state[@path]&.status == :pending && tx << Event.new(path: @path, op: :add, value: 0) }
+  end
 
   #: (**untyped) -> self
   def meta(**attributes)

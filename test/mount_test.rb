@@ -205,6 +205,45 @@ class MountTest < Minitest::Test
     assert_nil mount.task.message
   end
 
+  def test_a_remote_past_its_tasks_fails_the_mount_and_the_batch_is_rolled_back
+    local = TaskProgress.new("local")
+    mount = local.mount("Engine", max_tasks: 3)
+    child, batches = remote
+    child.subtask("A") { |a| a.subtask("A1") }
+    batches.each { assert_equal :applied, mount << it }
+    child.transaction { 2.times { |i| child.subtask("B#{i}") } }
+
+    assert_equal :rejected, mount << batches.last
+    assert_equal ["A"], mount.task.subtasks.map(&:name), "nothing of the batch that went over stays"
+    assert_equal ["TaskProgress::TooManyTasks", "Sent more than 3 tasks"], mount.task.error.values_at(:class, :message)
+    child.subtask("C")
+    assert_equal :rejected, mount << batches.last, "and nothing more is taken from it"
+  end
+
+  def test_a_reset_frees_the_tasks_it_replaces
+    local = TaskProgress.new("local")
+    mount = local.mount("Engine", max_tasks: 2)
+    first, first_batches = remote
+    first.subtask("A")
+    first.subtask("B")
+    first_batches.each { mount << it }
+
+    restarted, = remote
+    restarted.subtask("C")
+    restarted.subtask("D")
+    assert_equal :applied, mount << restarted.log.squashed
+    assert_equal ["C", "D"], mount.task.subtasks.map(&:name)
+  end
+
+  def test_the_default_limit_is_generous_and_nil_has_none
+    assert_equal 32_768, TaskProgress.new("local").mount("Engine").max_tasks
+    mount = TaskProgress.new("local").mount("Engine", max_tasks: nil)
+    child, batches = remote
+    child.transaction { 40_000.times { child.subtask("x") } }
+    batches.each { assert_equal :applied, mount << it }
+    assert_equal 40_000, mount.task.subtasks.length
+  end
+
   def test_garbage_is_rejected
     mount = TaskProgress.new("local").mount("Engine")
     assert_equal :rejected, mount << "not json"

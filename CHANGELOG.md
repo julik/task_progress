@@ -7,9 +7,12 @@ is nothing before it to be compatible with.
 
 - Progress as a log of change events, committed as numbered batches under one lock, and squashed for whoever joins late.
 - Trees of tasks: counted, weighted, indeterminate, expected. A task finishes at its total, and a parent only once everything under it ends.
+- `run` starts a task's clock as its work begins, so a phase that says nothing until it ends is timed from its start, not its end.
 - Bars, `iterate`, `track_io` (with progressive_io), and a CLI that draws a tree on a terminal and an execution log on CI.
 - Outputs: a terminal, an execution log, NDJSON, buffered and squashed, a Ractor port, Turbo Streams, any lambda.
 - Mounts: subtrees fed from subprocesses (over a pipe, with cancels going the other way), Ractors (Ruby 4.0) and streams. `mount.pipes` hands you the pipes and the environment a child finds them by; starting the child - spawned, forked, however - stays yours. `Mount#spawn` is gone.
+- A mount takes up to 32,768 tasks from its remote, or `max_tasks:` of them, or any number with nil; past that it fails with a `TaskProgress::TooManyTasks` and asks the remote to cancel.
+- `TaskProgress.utf8` and `TaskProgress.human_bytes` are public, for text on its way elsewhere and for notes that name a size.
 - Canceling, from any thread or from outside, with signed cancel tokens and a cancellations resource.
 - Handing work off through a stream - in memory, or Redis - to a job or a worker anywhere: `handoff`, `adopt`, `follow`, `fetch`. Followers notice a worker that went away, and a retry starts the tree over as the next attempt.
 - One run writes a handed-off tree at a time: a run that was taken over from cannot take it back, cancel requests name the run they are for, and a write that fails is made good by the next.
