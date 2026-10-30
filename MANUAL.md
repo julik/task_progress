@@ -445,7 +445,7 @@ rescue TaskProgress::Canceled
 end
 ```
 
-**Threads and child processes follow.** Workers on threads of their own each stop at their next tick. A child process gets the request over its control pipe, and the same patterns apply inside it. A child too stuck to notice is sent TERM after the mount's `grace`, which Ruby raises inside the work like any other exception.
+**Threads and child processes follow.** Workers on threads of their own each stop at their next tick. A child process gets the request over its control pipe, and the same patterns apply inside it. A child too stuck to notice is whoever started it's to stop - a TERM, which Ruby raises inside the work like any other exception, is the usual way.
 
 **Afterwards, `canceled?` tells what happened**, since `run` returns `nil` for a canceled task:
 
